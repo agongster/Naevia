@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+server/.venv/
+server/.env
+
+# Godot
+client/.godot/
+*.import.tmp
+
+# OS
+.DS_Store
