@@ -24,6 +24,12 @@
 
 **Outcome:** Claude read SPEC.md and checked that the repo already began with Ryan's 7 unmodified commits (tree clean, latest `6bb0698`), so Step 0 was already satisfied. It re-validated all 35 art PNGs against the manifest, with 0 mismatches. Then it built the FastAPI backend (`server/`), with 33 passing pytest tests, as 4 small commits. It wrote README.md, HANDOFF_REPORT.md, this log, and a proposals section at the bottom of SPEC.md. It did not start the Godot client, because Godot isn't installed on this machine.
 
+### 2. 2026-10-29
+
+> please make sure that 75% of the original work is maintained. that said, it seems like because there's no code, there's not much to modify in the first place? and i should just be going off of the art and other references? the 75% is referring more to restructuring code and whatnot.
+
+**Outcome:** Claude compared the repo with Ryan's last commit (`6bb0698`) using git diff and confirmed that 100% of his work is unchanged. All 55 of his files are intact. The art has no changes. SPEC.md has 0 lines removed and only the appended proposals section. All 20 changed files are additions (1,083 lines). Claude agreed that, with no inherited code, the 75% rule means keeping the spec's design and the art package as the foundation, rather than restructuring them.
+
 ## Times the AI did something I didn't want
 
 ### A. Trimmed real dependencies out of the lock file
