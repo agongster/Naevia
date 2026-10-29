@@ -501,3 +501,21 @@ Current decision: NOT READY — implementation and live playthroughs have not be
 - [Terraria unit conversion](https://terraria.wiki.gg/wiki/Template%3AReal-life_size)
 - [Terraria player dimensions](https://docs.tmodloader.net/docs/stable/class_player.html)
 
+
+---
+
+## Proposed Additions (Phase 2, April Gong — not part of the original spec)
+
+> Everything above this line is Ryan Zhou's SPEC.md exactly as received at commit `6bb0698`. The items below are proposals only; they do not change any requirement above.
+
+**P1. Documentation location.** Sections 2, 11 and 12 forbid a README and require setup/acceptance results inside this file. For course handoff, setup instructions, the code map and the per-item acceptance report (format of §12.2) live in `README.md`, and an assessment of the inherited work lives in `HANDOFF_REPORT.md`. Proposal: allow §11/§12 content to live in README.md and keep SPEC.md as the design contract.
+
+**P2. Provider base URL.** Resolve §11.2's open question: `NAEVIA_PROVIDER_BASE_URL` includes the version prefix (e.g. `https://api.openai.com/v1`); the adapter appends only `/chat/completions`.
+
+**P3. Memory validation on both sides.** §5.4 does not say who rejects invented sources. Proposal: the backend validates every proposal (returns HTTP 422 on rejection, 502 on provider failure) and the client re-checks character ID and revision before replacing its file.
+
+**P4. Oversized memory.** Reject proposals whose combined entry text exceeds 3,000 characters, and cap single entries at 400 characters; the model (or mock) is responsible for consolidating before proposing.
+
+**P5. Mock labeling.** Mock replies are prefixed `[mock]` so that mock output can never be mistaken for live evidence during acceptance.
+
+**P6. Marker targets.** A `@to:` marker naming the speaker themself or a non-participant falls back to `player`, including in private conversations.
