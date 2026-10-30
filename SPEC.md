@@ -519,3 +519,9 @@ Current decision: NOT READY — implementation and live playthroughs have not be
 **P5. Mock labeling.** Mock replies are prefixed `[mock]` so that mock output can never be mistaken for live evidence during acceptance.
 
 **P6. Marker targets.** A `@to:` marker naming the speaker themself or a non-participant falls back to `player`, including in private conversations.
+
+**P7. Runtime-built SpriteFrames and TileSet.** §3.3 step 2 asks for `SpriteFrames` resources built in Godot. The client instead builds them (and the TileSet) at startup from `client/data/visuals.json`, which `client/tools/sync_art.py` generates from `art/export/manifest.json`. This keeps one source of truth for frame layout, fps and anchors. Proposal: accept data-driven construction as satisfying §3.3 step 2.
+
+**P8. Client launch options.** `-- --save-slot=<name>` selects `user://saves/<name>/` (supports §11.3's fresh-save testing without touching the real save) and `-- --backend-url=<url>` overrides `client/data/config.json` (needed when port 8000 is already taken).
+
+**P9. Level as data.** The editable level (§3.3 step 3) is `client/data/level.json`: ordered rectangle fills per tile layer plus props. Terrain is cleared wherever a resource is defined so mined cells reveal the wall layer behind them.
