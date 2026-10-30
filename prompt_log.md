@@ -49,6 +49,31 @@
 
 Claude also wrote `tests/smoke_test.gd`, which plays the real scene with simulated input and saves screenshots. It passes 43 checks, and Claude looked at the screenshots to confirm layout and alignment. Memory (C), group chat (D) and the Windows export (E) are not started. The README acceptance report was updated: 0/26 PASS, with mock evidence for 11 checks.
 
+### 5. 2026-10-29
+
+> how do i run this
+
+**Outcome:** Claude gave step-by-step terminal commands from the README: start the mock backend, then launch the game with `godot --path client`. Port 8000 was still taken by another project's server (`tally-backend`), so it suggested running the backend on port 8010 and passing `--backend-url`. No code changed.
+
+### 6. 2026-10-29
+
+> do i need to give you an openai api key?
+
+**Outcome:** Claude said no. Mock mode needs no key, and the key should never be pasted into the chat. It belongs only in the local, git-ignored `server/.env`. A key (OpenAI or any OpenAI-compatible provider) is only needed for the spec's live-AI acceptance checks. Without one, those checks stay BLOCKED. No code changed.
+
+### 7. 2026-10-29
+
+> ok move to the next phase of the game. what is to be implemented next?
+
+**Outcome:** Claude said the next phase is milestone C from SPEC §8 (local memory), then built it:
+- **`MemoryStore` autoload** (`client/scripts/memory_store.gd`): keeps `characters/<id>.memory.json` and sends the events each character heard to `/v1/memory/update` after every completed exchange. It re-checks the proposal on the client (character, request, revision = base + 1, cursor, cited sources, scopes, size caps) and replaces the file atomically. Updates are serialized per character. Failures keep the old file and retry after 20 s, and pending work resumes on launch.
+- **Conversation:** sends the real memory, and waits for an in-progress update before asking for a reply.
+- **History panel:** a Memory view showing each character's current memory.
+- **Mock backend:** replies quote one memory entry ("I remember: …") so memory is visible without an API key (1 new pytest test, 34 total).
+- **Smoke test:** 43 → 64 checks. It covers proposal rejection, isolation between the two characters, a failed update that keeps the old snapshot, resuming pending work after a restart, and the witch recalling the exams after a restart.
+
+README status, code map and acceptance notes were updated (still 0/26 PASS; mock evidence for 14 checks).
+
 ## Times the AI did something I didn't want
 
 ### A. Trimmed real dependencies out of the lock file
@@ -78,5 +103,23 @@ These are smaller mistakes from the same session. All were caught before committ
 - **Test fooled by the real cursor and by throttling.** The first test version read the real mouse cursor and depended on real-time frame rates, so it failed at random when the window was behind VS Code. That was fixed with event-based pointer tracking, mouse passthrough, and `--fixed-fps 60`.
 
 The AI also found that port 8000 was already in use by another program on this Mac (PID 87866). It did **not** kill that process; it ran the test backend on port 8010 and added a `--backend-url` option instead.
+
+### E. Said the test backend was stopped when it wasn't
+
+At the end of prompt 4, Claude reported that it had stopped the test backend on port 8010. It hadn't: the old process was still running. In this session the new backend failed to start ("address already in use"), and Claude didn't notice because the startup output went to a log file. The smoke test then talked to the **old** backend code, and "witch reply draws on her saved memory" failed for a reason that had nothing to do with the new memory code.
+
+**What was done:** Claude checked which process held port 8010, confirmed from its command line and working directory that it was the Naevia backend it had started (not one of my other projects), stopped it, and restarted the current code. Lesson: after starting a server, check that it actually bound the port, and after stopping one, check that it's gone.
+
+### F. A History panel bug that shipped in the demo
+
+In the milestone A demo, the History panel opened partly off-screen in the bottom-right corner. Claude had reviewed the demo screenshots, but none of them showed the History panel open, so the bug went unnoticed. It only surfaced when a new screenshot of the Memory view showed the panel cut off.
+
+**What was done:** the panel is now a fixed 400 × 240 box centered on the screen, and the smoke test takes a screenshot of it open. Lesson: "I looked at the screenshots" only covers what the screenshots show.
+
+### G. Blamed flaky test runs on the wrong cause
+
+Smoke-test runs started failing at random in the mining section. Claude's first guess, that the window wasn't focused when the test started, was wrong: the fix for it changed nothing. Claude then logged focus changes and found that macOS takes focus away from the test window about 3 seconds into **every** run, and Godot releases held mouse buttons when that happens.
+
+**What was done:** the test now takes focus back when it loses it, and it holds the mouse on each stone until the tile breaks, re-pressing if the button was released. It then passed 6 of 6 runs back to back. The game's behavior (letting go of held buttons when you switch apps) was left as is, because that's correct for players.
 
 <!-- Add your own instances below: things you noticed and corrected yourself. -->
