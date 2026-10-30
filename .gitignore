@@ -11,3 +11,6 @@ client/.godot/
 
 # OS
 .DS_Store
+
+# Exports (large binaries; distribute separately)
+build/
