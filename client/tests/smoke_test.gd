@@ -372,6 +372,10 @@ func _memory_validation_checks() -> void:
 	bad.facts[0].share_scope = "public"
 	_check(check.call(bad, "witch") != "", "invalid share scope rejected")
 	_check(check.call(good, "blacksmith") != "", "proposal for another character rejected")
+	var leaky := good.duplicate(true)
+	leaky.facts[0].share_scope = "shared"
+	MemoryStore._enforce_private(leaky, {"e1": true})
+	_check(leaky.facts[0].share_scope == "private", "entry from a private event is forced private")
 
 
 func _memory_text(id: String) -> String:

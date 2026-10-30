@@ -5,8 +5,9 @@ extends Node
 ## a character the player names answers first, otherwise the first responder
 ## alternates; a reply can nominate the other character with @to:; at most
 ## MAX_TURNS character turns per player message, then control returns to the
-## player. A message sent during group turns cancels the queued turns after the
-## current one. Request IDs guard against late replies landing in a different
+## player. A message to everyone gives each character a turn (they may decline
+## with "..."), so neither is left silent when the first one answers the player.
+## A message sent during group turns cancels the queued turns after the current one. Request IDs guard against late replies landing in a different
 ## conversation. When a message's turns finish, each listener's memory update is queued.
 
 signal opened
@@ -28,6 +29,8 @@ var pending_request := ""
 var speaker := ""             # character whose turn is streaming, or failed and awaiting retry
 var turns_taken := 0
 var queued_message := ""      # player message sent while group turns were running
+var _to_all := false          # the current player message was addressed to everyone
+var _spoken: Array = []       # characters who have had a turn for the current player message
 var last_error := ""
 
 var _reply := ""
@@ -132,6 +135,8 @@ func _start_player_message(text: String) -> void:
 			_first_responder += 1
 	SaveManager.append_history(character_id, _event("player", addressee, text))
 	turns_taken = 0
+	_to_all = addressee == "all"
+	_spoken = []
 	_request_reply()
 
 
@@ -185,14 +190,30 @@ func _on_done(request_id: String, speaker_id: String, addressee: String) -> void
 		SaveManager.append_history(character_id, _event(speaker_id, addressee, text))
 		world.ui.bubbles.show_text(anchors[speaker], _bubble_label(), text, false)
 	turns_taken += 1
+	_spoken.append(speaker)
+	var next := _next_speaker(addressee if not declined else "player")
 	if queued_message:
 		_take_queued_message()
-	elif is_group() and not declined and addressee in participants and addressee != speaker and turns_taken < MAX_TURNS:
-		speaker = addressee
+	elif next:
+		speaker = next
 		_request_reply()
 	else:
 		_queue_memory_updates()
 		state_changed.emit()
+
+
+## Group turn order after a reply (SPEC 4.3): a nominated character answers;
+## otherwise, for a message to everyone, a character who hasn't spoken yet goes.
+func _next_speaker(addressee: String) -> String:
+	if not is_group() or turns_taken >= MAX_TURNS:
+		return ""
+	if addressee in participants and addressee != speaker:
+		return addressee
+	if _to_all:
+		for id in participants:
+			if not id in _spoken:
+				return id
+	return ""
 
 
 func _on_failed(request_id: String, message: String) -> void:

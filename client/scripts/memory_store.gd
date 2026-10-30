@@ -88,19 +88,25 @@ func request_update(id: String) -> void:
 	var memory := get_memory(id)
 	var new_events: Array = []
 	var allowed := {}
+	var private := {}  # sources said where only the player and this character could hear
 	for ev in events:
 		new_events.append({"event_id": ev.event_id, "speaker": ev.speaker, "addressee": ev.addressee,
 			"audience": ev.audience, "text": ev.text})
 		allowed[ev.event_id] = true
+		if ev.audience.all(func(a: String) -> bool: return a == "player" or a == id):
+			private[ev.event_id] = true
 	for section in SECTIONS:
 		for entry in memory[section]:
 			for source in entry.source_event_ids:
 				allowed[source] = true
+				if entry.share_scope == "private":
+					private[source] = true
 	var job := {
 		"request_id": "m%d_%04d" % [int(Time.get_unix_time_from_system() * 1000.0), randi() % 10000],
 		"base_revision": int(memory.revision),
 		"last_event_id": events[-1].event_id,
 		"allowed": allowed,
+		"private": private,
 	}
 	_in_flight[id] = job
 	ApiClient.post_json("/v1/memory/update", {
@@ -130,6 +136,7 @@ func _on_result(id: String, job: Dictionary, code: int, data: Variant) -> void:
 			_retry_timer.start()
 	else:
 		var memory := _normalize(data.memory)
+		_enforce_private(memory, job.private)
 		if SaveManager.write_json_atomic(_path(id), memory):
 			_cache[id] = memory
 			last_error.erase(id)
@@ -137,6 +144,16 @@ func _on_result(id: String, job: Dictionary, code: int, data: Variant) -> void:
 			request_update(id)  # events that arrived meanwhile, or the next batch
 	if not _in_flight.has(id):
 		settled.emit(id)
+
+
+## An entry citing anything said privately stays private, whatever the model
+## labeled it (seen live: a private exam talk marked "shared" reached a group prompt).
+## The backend does the same; this is the last gate before the file.
+static func _enforce_private(memory: Dictionary, private: Dictionary) -> void:
+	for section in SECTIONS:
+		for entry in memory[section]:
+			if entry.source_event_ids.any(func(s: String) -> bool: return private.has(s)):
+				entry.share_scope = "private"
 
 
 ## The client's own checks before replacing the file (SPEC 5.4); the backend checks too.
