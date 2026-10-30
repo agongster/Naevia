@@ -37,6 +37,15 @@ Reviewer: April Gong · Date: 2026-10-29 · Inherited revision: `6bb0698`
 
 **7. Provenance.** The art was produced with an image generator and normalized, with no layered source. Any new art (more furniture, for example) has to be matched by eye. Since there's no layered source, regenerating a variation of an existing sprite isn't possible.
 
+## Update after integrating the art (2026-10-29)
+
+Building the playable demo was a real test of Ryan's package, and it held up:
+- **Anchors and frames:** every foot anchor in the manifest (`(24, 60)` for humanoids, `(16, 28)` for the pigeon) lined the sprites up on the ground with no hand adjustment. The 4-frame walk and mine sheets loop cleanly at the manifest fps.
+- **Tiles and props:** the 11 tiles were enough for the house, ground, mound, and the dark wall that appears behind mined stone. Door, window and trim props sit on the tile grid. Table, chair and lamp match their 3×2, 1×2 and 1×3 footprints.
+- **UI direction:** `ui_direction.png` was precise enough to copy the panel and button colors and sizes directly.
+
+No art had to be replaced or regenerated. The only missing input was the font, which Ryan had already flagged.
+
 ## Overall
 
 This is a high-quality *design* handoff with a verified art package and no implementation. I trust the art and the API/memory contracts. I'd treat the length of the spec, its Windows-only acceptance path, and its ban on supporting docs as obstacles to work around rather than requirements. In my judgment, the biggest risk to finishing Demo 1 is the Godot client, which has not been started and is most of the remaining work.
