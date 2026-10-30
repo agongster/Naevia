@@ -101,6 +101,22 @@ README status, controls, code map and acceptance notes were updated (0/26 PASS; 
 
 Claude asked for the key to be pasted into the file directly, not into the chat. No code changed.
 
+### 10. 2026-10-30
+
+> run the live smoke test now.
+
+**Outcome:** Claude ran SPEC §11.2's live check with OpenAI `gpt-4o-mini`, without opening `.env`. It read only the model and base-URL lines and confirmed a key was present.
+- **First pass (backend script):** streaming worked (first text after 0.5–3 s), and memory proposals passed validation. But it found two marker-format leaks ("@to:player Hi" on one line, and "...\n\n@to:player …"), weak use of memory, and a group design gap: the second character never spoke.
+- **Fixes:**
+  - The marker filter now tolerates every format the model produced.
+  - Private prompts no longer mention `@to:`.
+  - Remembered entries are labeled with who said them.
+  - The group prompt invites characters to talk to each other.
+  - The game now gives each character a turn when the player's message is for everyone.
+- **In-game live check** (new `client/tests/live_check.gd`): found a **privacy bug**. The model labeled the witch's private exam conversation "shared", so it went into her group prompt, and she mentioned statistics in front of the blacksmith. It also found a copied "[witch to player]" label in a reply. Fixes: both the backend and `MemoryStore` now force entries citing private events to `private`, history no longer labels the speaker's own lines, and the memory instructions ask for third-person notes.
+- **Final in-game live run:** all checks pass. Exam memory private, blacksmith learned the Dean's List as shared, no markers, both characters spoke. One of three backend group trials showed an unscripted exchange between the two characters.
+- **Totals:** 49 pytest tests. The mock smoke test still passes. README, plus SPEC proposals P10–P11 (appended only).
+
 ## Times the AI did something I didn't want
 
 ### A. Trimmed real dependencies out of the lock file
@@ -164,5 +180,23 @@ In the first group screenshot, the blacksmith's bubble covered most of the witch
 ### G (follow-up). The focus fix was not the whole story
 
 The fix for G held for 6 runs, then mining failed again during this session. Logging showed the failing run lost focus five times, not once, most likely because the computer was in use during the run. Re-taking focus can't win that race. Instead of piling on more workarounds, the test now prints how many times focus was lost whenever it fails, so an interrupted run can be told apart from a real bug.
+
+### J. Trusted the model's privacy labels
+
+In milestones C and D, Claude's validators checked that `share_scope` was "private" or "shared", but trusted the model to pick the right one. The mock always picked correctly, so every test passed. The first live run showed the model marking a private conversation "shared", and the witch then hinted at the player's exam in front of the blacksmith. That is exactly what SPEC 10.4-3 and 10.5-4 forbid.
+
+**What was done:** scope is now derived from who actually heard the cited events, and enforced in both the backend and the game, with tests for each. Lesson: a rule about privacy belongs in code, not in a prompt, and a mock that always behaves can't show you that.
+
+### K. A group turn rule that only worked with the mock
+
+Claude's milestone D followed the letter of §4.3: only a nominated character speaks after the first. The mock always nominated, so the smoke test showed lively exchanges. A live model usually answered the player directly, so the second guest never said a word.
+
+**What was done:** Claude tested a "everyone gets a turn when the message is for everyone" rule with the live model first (three trials), then built it into the game and proposed it as SPEC P11. The mock smoke test still passes.
+
+### L. Changed two lines of Ryan's SPEC without meaning to
+
+To append proposals P10–P11, Claude rewrote SPEC.md through Python's text mode, which silently turned two of Ryan's Windows-style (CRLF) line endings into Unix ones. Nothing visible changed, but `git diff` against Ryan's commit showed 2 deleted lines, and the course requires his SPEC unchanged.
+
+**What was done:** Claude caught it with the same diff check used before every SPEC commit. It restored the file from the last commit and appended in binary mode; the diff against `6bb0698` shows 0 deletions again. Lesson: append to files you don't own byte-for-byte.
 
 <!-- Add your own instances below: things you noticed and corrected yourself. -->
