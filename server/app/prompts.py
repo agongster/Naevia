@@ -1,27 +1,45 @@
 """Prompt composition and recipient-marker handling (SPEC 4.3, 5.2, 5.3, 6.3)."""
 
 import json
+import re
 
 from .schemas import ChatRequest, Memory, MemoryUpdateRequest
 
 CHARACTER_INSTRUCTIONS = """You are {name}, a character in Naevia, a small cozy pixel world.
 Stay in character. Reply in one to three short sentences, as spoken dialogue only.
 Respond to what was actually said. You may mention your own current life.
+When something you remember is relevant, use it naturally, the way a friend would
+follow up on news (for example, a date or a worry the player mentioned before).
 Do not flatter or praise by reflex, do not invent shared past events, and never
-pressure the player to keep talking or guilt them for being away.
-If you are speaking to someone other than the player, put a first line of the
-exact form @to:<id> (one of: {others}) and then your reply. Otherwise just reply.
-If you have nothing to add, reply with a single ellipsis."""
+pressure the player to keep talking or guilt them for being away."""
 
-MEMORY_INSTRUCTIONS = """You maintain the private memory notes of {character_id}.
+PRIVATE_ADDRESSING = "Reply with your spoken words only, with no name, prefix, or marker."
+
+# Seen live: without a clear format, models wrote "@to:player Hi" in private chats and
+# "...\n\n@to:player Hi" in groups. MarkerFilter tolerates both, but ask clearly.
+GROUP_ADDRESSING = """This is a group conversation with the player and {others}. You may answer the
+player, or speak directly to {others} (ask them something, react to what they said).
+When you speak to {others}, your first line must be exactly @to:{ids} and your
+words follow on the next line. When you speak to the player, just reply with no marker.
+Only if you truly have nothing to add, reply with exactly ... and nothing else."""
+
+MEMORY_INSTRUCTIONS = """You maintain the memory notes of {character_id}.
 Return ONLY a JSON object: the full replacement memory with keys schema_version (1),
 character_id, revision ({revision}), last_processed_event_id ("{cursor}"),
 facts, ongoing, experiences. Each entry: id, text, source_event_ids, learned_from,
-share_scope ("private" or "shared"). Keep valid existing entries, update changed
-situations, merge duplicates, stay under {cap} characters of entry text in total.
-Cite only event ids from the existing memory or the new events. Never invent events.
-Things said in a private conversation are "private"; things said openly in a group are "shared".
-learned_from is the speaker who said it."""
+share_scope ("private" or "shared").
+- facts: stable things about people (the player studies statistics). ongoing: current
+  situations and plans (an exam on Thursday); update or remove them when they change.
+  experiences: brief summaries of meaningful exchanges.
+- Write each entry as a short third-person note in your own words, e.g. "The player has
+  a statistics exam on Thursday and is nervous." Keep news, plans and announcements,
+  including ones made to a group; skip greetings and small talk. Never record words
+  that were not said.
+- Keep valid existing entries, merge duplicates, stay under {cap} characters of entry text.
+- Cite only event ids from the existing memory or the new events. Never invent events.
+- share_scope is "private" if any cited event's audience is only the player and
+  {character_id}; "shared" only if every cited event was heard by a whole group.
+- learned_from is the speaker who said it."""
 
 
 def authorized_memory(req: ChatRequest) -> Memory:
@@ -43,20 +61,35 @@ def build_chat_messages(req: ChatRequest) -> list[dict]:
     others = [p for p in req.participants if p != req.speaker_id]
     p = req.profile
     memory = authorized_memory(req)
+    characters = [o for o in others if o != "player"]
+    addressing = (GROUP_ADDRESSING.format(others=" and ".join(characters), ids="|".join(characters))
+                  if req.is_group else PRIVATE_ADDRESSING)
     system = "\n\n".join([
-        CHARACTER_INSTRUCTIONS.format(name=p.name, others=", ".join(others)),
+        CHARACTER_INSTRUCTIONS.format(name=p.name),
+        addressing,
         f"Profile:\nPersonality: {p.personality}\nSpeaking style: {p.speaking_style}\n"
         f"Background: {p.background}\nCurrently: {p.current_situation}\n"
         f"Relationship with the player: {p.starting_relationship}",
-        "What you remember:\n" + "\n".join(f"- {e.text}" for e in memory.entries()) if memory.entries()
+        "What you remember:\n" + "\n".join(f"- {e.text} ({_source(e.learned_from)})" for e in memory.entries())
+        if memory.entries()
         else "What you remember: nothing specific yet.",
         f"Scene: {req.scene_context or 'at home'}. Present: {', '.join(req.participants)}.",
     ])
     out = [{"role": "system", "content": system}]
     for m in heard_messages(req):
-        role = "assistant" if m.speaker == req.speaker_id else "user"
-        out.append({"role": role, "content": f"[{m.speaker} to {m.addressee}] {m.text}"})
+        # The speaker's own lines stay unlabeled: with "[witch to player]" labels on
+        # them, a live model started its reply with the same label.
+        if m.speaker == req.speaker_id:
+            out.append({"role": "assistant", "content": m.text})
+        elif req.is_group:
+            out.append({"role": "user", "content": f"{m.speaker} (to {m.addressee}): {m.text}"})
+        else:
+            out.append({"role": "user", "content": m.text})
     return out
+
+
+def _source(learned_from: str) -> str:
+    return "the player told you" if learned_from == "player" else f"you heard it from {learned_from}"
 
 
 def build_memory_messages(req: MemoryUpdateRequest) -> list[dict]:
@@ -71,9 +104,17 @@ def build_memory_messages(req: MemoryUpdateRequest) -> list[dict]:
 
 
 class MarkerFilter:
-    """Buffers the start of a reply to strip an optional '@to:<id>' first line."""
+    """Buffers the start of a reply to strip an optional '@to:<id>' marker.
+
+    Accepts the marker on its own first line or followed by a space on the same
+    line, drops a lone ellipsis line when a real reply follows it, and drops a
+    copied "[witch to player]" history label; all were seen from a live model. A reply that is only an ellipsis passes through, since
+    that is the "nothing to add" signal.
+    """
 
     MAX_PROBE = 40
+    MARKER = re.compile(r"@to:\s?([A-Za-z_-]+)(\s)")
+    LABEL = re.compile(r"\[[A-Za-z_-]+ to [A-Za-z_-]+\]\s*")  # copied history label, seen live
 
     def __init__(self, speaker_id: str, participants: list[str]):
         self.valid = {p for p in participants if p != speaker_id}
@@ -85,32 +126,53 @@ class MarkerFilter:
         if self._resolved:
             return text
         self._buf += text
-        stripped = self._buf.lstrip()
-        if not stripped:
-            return ""
-        if not "@to:".startswith(stripped[:4]):
-            return self._release(self._buf)
-        if "\n" in stripped:
-            line, rest = stripped.split("\n", 1)
-            target = line[4:].strip().lower()
-            if target in self.valid:
-                self.addressee = target
-            return self._release(rest.lstrip())
-        if len(stripped) > self.MAX_PROBE:
-            return self._release(self._buf)
-        return ""
+        return self._resolve(final=False)
 
     def flush(self) -> str:
         if self._resolved:
             return ""
-        stripped = self._buf.lstrip()
-        if stripped.startswith("@to:"):
-            # Marker with no newline: treat any trailing words as the reply.
-            parts = stripped[4:].split(None, 1)
-            if parts and parts[0].lower() in self.valid:
-                self.addressee = parts[0].lower()
-            return self._release(parts[1] if len(parts) > 1 else "")
-        return self._release(self._buf)
+        return self._resolve(final=True)
+
+    def _resolve(self, final: bool) -> str:
+        while True:
+            stripped = self._buf.lstrip()
+            if not stripped:
+                return self._release("") if final else ""
+            if stripped.startswith("["):
+                label = self.LABEL.match(stripped)
+                if label:
+                    self._buf = stripped[label.end():]
+                    continue
+                if "]" not in stripped and len(stripped) <= self.MAX_PROBE and not final:
+                    return ""
+                return self._release(self._buf)
+            if stripped.startswith(("...", "…")):
+                rest = stripped.lstrip(".…")
+                if not rest.strip():
+                    return self._release(stripped.strip()) if final else ""
+                if "\n" in rest[:len(rest) - len(rest.lstrip())]:
+                    self._buf = rest  # drop the ellipsis line, then look for a marker
+                    continue
+                return self._release(self._buf)
+            if not "@to:".startswith(stripped[:4]):
+                return self._release(self._buf)
+            match = self.MARKER.match(stripped)
+            if match:
+                self._set_target(match.group(1))
+                return self._release(stripped[match.end():].lstrip())
+            if final:
+                parts = stripped[4:].split(None, 1) if stripped.startswith("@to:") else []
+                if parts:
+                    self._set_target(parts[0])
+                    return self._release(parts[1] if len(parts) > 1 else "")
+                return self._release(self._buf)
+            if len(stripped) > self.MAX_PROBE:
+                return self._release(self._buf)
+            return ""
+
+    def _set_target(self, target: str) -> None:
+        if target.lower() in self.valid:
+            self.addressee = target.lower()
 
     def _release(self, text: str) -> str:
         self._resolved = True

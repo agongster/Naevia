@@ -42,4 +42,21 @@ def validate_proposal(req: MemoryUpdateRequest, proposed: Memory) -> Memory:
         raise MemoryValidationError("memory exceeds text cap")
     if proposed.last_processed_event_id != req.new_events[-1].event_id:
         raise MemoryValidationError("processing cursor must equal the last supplied event")
+    enforce_private_scope(req, proposed)
     return proposed
+
+
+def enforce_private_scope(req: MemoryUpdateRequest, proposed: Memory) -> None:
+    """An entry citing anything said privately stays private, whatever the model says.
+
+    Seen live: gpt-4o-mini labeled a private exam conversation "shared", which put
+    it into a group prompt. Downgrading (rather than rejecting) can only make memory
+    more private and keeps updates from failing and retrying forever.
+    """
+    private = {ev.event_id for ev in req.new_events if set(ev.audience) <= {"player", req.character_id}}
+    for entry in req.memory.entries():
+        if entry.share_scope == "private":
+            private.update(entry.source_event_ids)
+    for entry in proposed.entries():
+        if private.intersection(entry.source_event_ids):
+            entry.share_scope = "private"

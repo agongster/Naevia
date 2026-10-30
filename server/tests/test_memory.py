@@ -87,3 +87,31 @@ def test_group_events_become_shared(client):
     body = update_body(new_events=[msg("e5", "blacksmith", "I finally fixed the old bellows.", audience=group)])
     exp = client.post("/v1/memory/update", json=body).json()["memory"]["experiences"][0]
     assert exp["share_scope"] == "shared" and exp["learned_from"] == "blacksmith"
+
+
+def shared_proposal(sources, cursor):
+    mem = proposal(cursor=cursor, sources=sources).model_dump()
+    mem["facts"][0]["share_scope"] = "shared"
+    return Memory.model_validate(mem)
+
+
+def test_entry_from_private_events_is_forced_private():
+    # Seen live: the model labeled a private exam conversation "shared".
+    out = validate_proposal(req(), shared_proposal(("e1",), "e2"))
+    assert out.facts[0].share_scope == "private"
+
+
+def test_entry_from_group_events_can_stay_shared():
+    group = ["player", "witch", "blacksmith"]
+    r = req(new_events=[msg("g1", "player", "I made the Dean's List!", audience=group)])
+    assert validate_proposal(r, shared_proposal(("g1",), "g1")).facts[0].share_scope == "shared"
+
+
+def test_entry_citing_an_old_private_entry_stays_private():
+    group = ["player", "witch", "blacksmith"]
+    old = empty_memory("witch")
+    old["facts"] = [{"id": "f0", "text": "Exam Thursday", "source_event_ids": ["e1"],
+                     "learned_from": "player", "share_scope": "private"}]
+    r = req(memory=old, new_events=[msg("g1", "player", "Done with exams!", audience=group)])
+    out = validate_proposal(r, shared_proposal(("e1", "g1"), "g1"))
+    assert out.facts[0].share_scope == "private"

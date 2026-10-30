@@ -62,3 +62,51 @@ def test_no_marker_passes_text_through():
 
 def test_marker_cannot_target_self():
     assert feed_all(["@to:witch\nHm."]) == ("Hm.", "player")
+
+
+def test_marker_on_same_line_is_stripped():
+    # Seen live from gpt-4o-mini in a private chat.
+    assert feed_all(["@to:player Ah, nerves", " can be like weeds."]) == ("Ah, nerves can be like weeds.", "player")
+
+
+def test_same_line_marker_to_other_character():
+    assert feed_all(["@to:blacksmith What", " do you think?"]) == ("What do you think?", "blacksmith")
+
+
+def test_leading_ellipsis_line_before_reply_is_dropped():
+    # Seen live in a group chat: "...\n\n@to:player That's quite the accomplishment."
+    assert feed_all(["...", "\n\n@to:player That's", " quite something."]) == ("That's quite something.", "player")
+
+
+def test_ellipsis_alone_is_kept_as_decline():
+    assert feed_all(["..."]) == ("...", "player")
+    assert feed_all(["…"]) == ("…", "player")
+
+
+def test_ellipsis_starting_a_sentence_passes_through():
+    assert feed_all(["...well, maybe."]) == ("...well, maybe.", "player")
+
+
+def test_private_prompt_has_no_marker_instructions():
+    system = build_chat_messages(request(["player", "witch"], []))[0]["content"]
+    assert "@to:" not in system
+
+
+def test_group_prompt_explains_marker_and_memory_sources():
+    system = build_chat_messages(request(["player", "witch", "blacksmith"], []))[0]["content"]
+    assert "@to:blacksmith" in system
+    assert "Player likes plums (the player told you)" in system
+
+
+def test_copied_history_label_is_stripped():
+    # Seen live: "[witch to player] Rest is crucial..."
+    assert feed_all(["[witch to ", "player] Rest is", " crucial."]) == ("Rest is crucial.", "player")
+
+
+def test_bracketed_text_that_is_not_a_label_passes_through():
+    assert feed_all(["[sighs] Fine."]) == ("[sighs] Fine.", "player")
+
+
+def test_own_lines_are_unlabeled_in_history():
+    msgs = build_chat_messages(request(["player", "witch"], [msg("e1", "player", "Hi"), msg("e2", "witch", "Hello.")]))
+    assert msgs[1] == {"role": "user", "content": "Hi"} and msgs[2] == {"role": "assistant", "content": "Hello."}
