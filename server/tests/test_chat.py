@@ -35,6 +35,14 @@ def test_mock_is_deterministic(client):
     assert a == b
 
 
+def test_mock_reply_recalls_memory(client):
+    memory = empty_memory("witch", revision=1)
+    memory["experiences"] = [{"id": "m1_0", "text": "player said: I keep bees.", "source_event_ids": ["e0"],
+                              "learned_from": "player", "share_scope": "private"}]
+    text = "".join(e.get("text", "") for e in read_events(client.post("/v1/chat", json=chat_body(memory=memory))))
+    assert "I remember: \"player said: I keep bees.\"" in text
+
+
 def test_group_marker_is_stripped_and_routed(client):
     body = chat_body(participants=["player", "witch", "blacksmith"],
                      recent_messages=[msg("e1", "player", "I made the Dean's List!",

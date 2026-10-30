@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from .config import Settings
-from .prompts import build_chat_messages, build_memory_messages, heard_messages
+from .prompts import authorized_memory, build_chat_messages, build_memory_messages, heard_messages
 from .schemas import MEMORY_TEXT_CAP, ChatRequest, Memory, MemoryEntry, MemoryUpdateRequest
 
 
@@ -41,9 +41,17 @@ class MockProvider(ProviderAdapter):
         if last and last.speaker != "player" and last.speaker != req.speaker_id:
             return f"[mock] {req.profile.name} answers {last.speaker}: fair point. I'm {situation.lower()} myself."
         if last:
+            recalled = self.recall(req)
             return (f"[mock] {req.profile.name} heard: \"{last.text[:60]}\". "
-                    f"Meanwhile I'm {situation.lower()}. Long replies are split at sentence boundaries.")
+                    + (f"I remember: \"{recalled[:80]}\". " if recalled else "")
+                    + f"Meanwhile I'm {situation.lower()}. Long replies are split at sentence boundaries.")
         return f"[mock] Hello from {req.profile.name}."
+
+    @staticmethod
+    def recall(req: ChatRequest) -> str | None:
+        """Oldest authorized memory entry, so mock replies show memory working."""
+        entries = authorized_memory(req).entries()
+        return entries[0].text if entries else None
 
     async def stream_reply(self, req: ChatRequest) -> AsyncIterator[str]:
         for word in self.reply_text(req).split(" "):
