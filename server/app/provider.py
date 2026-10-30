@@ -24,6 +24,9 @@ class ProviderAdapter:
         raise NotImplementedError
 
 
+CHAIN_TAG = "#chain"  # mock only: characters keep addressing each other
+
+
 class MockProvider(ProviderAdapter):
     """Deterministic replies and memory snapshots; no network (SPEC 5.3)."""
 
@@ -39,6 +42,10 @@ class MockProvider(ProviderAdapter):
                     f"[mock] {req.profile.name} heard: \"{last.text[:60]}\". "
                     f"What do you make of that, {others[0]}?")
         if last and last.speaker != "player" and last.speaker != req.speaker_id:
+            last_player = next((m for m in reversed(heard) if m.speaker == "player"), None)
+            if req.is_group and last_player and CHAIN_TAG in last_player.text:
+                # Test hook: keep passing the turn so the client's 3-turn cap is exercised.
+                return f"@to:{last.speaker}\n[mock] {req.profile.name} passes it back to {last.speaker}."
             return f"[mock] {req.profile.name} answers {last.speaker}: fair point. I'm {situation.lower()} myself."
         if last:
             recalled = self.recall(req)

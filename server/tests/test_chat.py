@@ -53,6 +53,27 @@ def test_group_marker_is_stripped_and_routed(client):
     assert events[-1]["addressee"] == "blacksmith"
 
 
+def test_group_reply_to_character_answers_player(client):
+    group = ["player", "witch", "blacksmith"]
+    body = chat_body(speaker_id="blacksmith", participants=group,
+                     profile={**WITCH_PROFILE, "id": "blacksmith", "name": "Blacksmith"},
+                     memory=empty_memory("blacksmith"),
+                     recent_messages=[msg("e1", "player", "I made the Dean's List!", audience=group, addressee="witch"),
+                                      msg("e2", "witch", "What do you make of that?", audience=group,
+                                          addressee="blacksmith")])
+    events = read_events(client.post("/v1/chat", json=body))
+    assert events[-1]["addressee"] == "player"
+    assert "answers witch" in "".join(e.get("text", "") for e in events)
+
+
+def test_mock_chain_tag_keeps_passing_the_turn(client):
+    group = ["player", "witch", "blacksmith"]
+    body = chat_body(participants=group,
+                     recent_messages=[msg("e1", "player", "#chain go on", audience=group),
+                                      msg("e2", "blacksmith", "Over to you.", audience=group, addressee="witch")])
+    assert read_events(client.post("/v1/chat", json=body))[-1]["addressee"] == "blacksmith"
+
+
 def test_rejects_speaker_not_participant(client):
     assert client.post("/v1/chat", json=chat_body(speaker_id="blacksmith")).status_code == 422
 
