@@ -29,6 +29,7 @@
     { "visual": "prop.door",       "cell": [21, 15], "passable": true }
   ],
   "blacksmith_visit_cell": [25, 17],
+  "door_cell": [21, 17],
   "witch_group_cell": [12, 17],
   "blacksmith_group_cell": [16, 17]
 }

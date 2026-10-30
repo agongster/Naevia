@@ -58,9 +58,19 @@ func is_updating(id: String) -> bool:
 	return _in_flight.has(id)
 
 
-## Events this character heard that the memory has not processed yet.
+## Shared entries only, for group prompts (SPEC 6.3).
+func shareable(id: String) -> Dictionary:
+	var m := get_memory(id).duplicate(true)
+	for section in SECTIONS:
+		m[section] = m[section].filter(func(e: Dictionary) -> bool: return e.share_scope == "shared")
+	return m
+
+
+## Events this character heard that the memory has not processed yet: their private
+## history and the group transcript, merged in time order.
 func pending_events(id: String) -> Array:
-	var events := SaveManager.read_history(id)  # milestone D adds the group transcript
+	var events := SaveManager.read_history(id) + SaveManager.read_history(ConversationCoordinator.GROUP)
+	events.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return _event_ms(a) < _event_ms(b))
 	var cursor: Variant = get_memory(id).last_processed_event_id
 	if cursor != null:
 		var at := events.find_custom(func(e: Dictionary) -> bool: return e.event_id == cursor)
@@ -151,6 +161,11 @@ func _check_proposal(id: String, job: Dictionary, data: Variant) -> String:
 				if not job.allowed.has(source):
 					return "entry %s cites an unknown event" % entry.id
 	return ""
+
+
+## Event ids start with their creation time in ms ("e<ms>_<rand>"), so they sort in time order.
+static func _event_ms(event: Dictionary) -> int:
+	return int(String(event.event_id).substr(1).get_slice("_", 0))
 
 
 ## Shape and size checks shared by loading and accepting (SPEC 6.1). Returns "" if valid.

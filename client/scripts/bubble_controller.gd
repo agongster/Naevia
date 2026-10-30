@@ -139,10 +139,14 @@ func _process(_delta: float) -> void:
 		var pos := p - Vector2(b.size.x / 2.0, b.size.y + 4.0)
 		var m := STYLE.screen_margin
 		pos = pos.clamp(Vector2(m, STYLE.top_margin), view - b.size - Vector2(m, m))
-		# Push overlapping bubbles upward so both stay readable.
+		# Push overlapping bubbles upward so both stay readable; when the top of the
+		# screen leaves no room, move sideways away from the other bubble instead.
 		for r in placed:
 			if Rect2(pos, b.size).intersects(r):
 				pos.y = maxf(STYLE.top_margin, r.position.y - b.size.y - 2.0)
+			if Rect2(pos, b.size).intersects(r):
+				pos.x = r.end.x + 2.0 if p.x >= r.get_center().x else r.position.x - b.size.x - 2.0
+				pos.x = clampf(pos.x, m, view.x - b.size.x - m)
 		b.position = pos.round()
 		b.set_meta("tip", p)
 		placed.append(Rect2(b.position, b.size))

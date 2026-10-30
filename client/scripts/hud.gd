@@ -129,11 +129,8 @@ func _build_contacts() -> void:
 	_contacts_panel = _popup_panel([
 		["Witch", world.contacts.summon_pigeon],
 		["Blacksmith", world.contacts.summon_blacksmith],
-		["Invite Both", Callable()],
+		["Invite Both", world.contacts.invite_both],
 	])
-	var invite: Button = _contacts_panel.get_child(0).get_child(2)
-	invite.disabled = true
-	invite.tooltip_text = "Group conversation is not built yet (milestone D)."
 
 
 func _build_dev() -> void:
@@ -181,8 +178,8 @@ func _build_history() -> void:
 	var tabs := HBoxContainer.new()
 	_history_title = _label("History", 11)
 	tabs.add_child(_history_title)
-	for key in Defs.characters:
-		tabs.add_child(_button(Defs.characters[key].name, func() -> void:
+	for key in Defs.characters.keys() + [ConversationCoordinator.GROUP]:
+		tabs.add_child(_button(Defs.characters[key].name if Defs.characters.has(key) else "Group", func() -> void:
 			_history_key = key
 			_refresh_history()))
 	tabs.add_child(_button("Memory", func() -> void:
@@ -264,8 +261,13 @@ func _refresh_reply() -> void:
 	if not c.is_open():
 		_reply_field.release_focus()
 		return
-	_reply_to.text = "%s%s" % [c.label, "   (waiting for a reply…)" if c.is_waiting() else ""]
-	_send_button.disabled = c.is_waiting()
+	var note := ""
+	if c.queued_message:
+		note = "   (your message is next)"
+	elif c.is_waiting():
+		note = "   (%s is replying…)" % Defs.characters[c.speaker].name if c.is_group() else "   (waiting for a reply…)"
+	_reply_to.text = c.label + note
+	_send_button.disabled = not c.can_send()
 
 
 func _refresh_history() -> void:
@@ -280,12 +282,17 @@ func _refresh_history() -> void:
 		_history_list.add_child(_label("No conversations yet.", 10))
 	for ev in events:
 		var who: String = "You" if ev.speaker == "player" else Defs.characters.get(ev.speaker, {"name": ev.speaker}).name
+		if ev.speaker != "player" and Defs.characters.has(ev.addressee):
+			who += " → " + Defs.characters[ev.addressee].name  # one character talking to the other
 		_history_list.add_child(_wrapped("%s: %s" % [who, ev.text], 10))
 
 
 ## What the selected character currently remembers, with where each entry came from.
 func _refresh_memory() -> void:
 	_history_title.text = "Memory"
+	if not Defs.characters.has(_history_key):
+		_history_list.add_child(_wrapped("Group talk has no memory of its own. Choose Witch or Blacksmith to see what each one took from it.", 10))
+		return
 	var m := MemoryStore.get_memory(_history_key)
 	var status := "%s · revision %d · %d new event(s) not yet remembered" % [
 		Defs.characters[_history_key].name, int(m.revision), MemoryStore.pending_events(_history_key).size()]

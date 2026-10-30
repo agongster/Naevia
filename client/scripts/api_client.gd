@@ -10,6 +10,9 @@ signal health_checked(ok: bool, mode: String)
 const TIMEOUT_S := 90.0
 
 var base_url: String
+## The most recent /v1/chat body per speaker, kept in memory only, so tests and
+## developers can inspect exactly what context a character was given (SPEC 10.4-3).
+var last_chat_requests: Dictionary = {}
 var _host: String
 var _port: int
 var _streams: Dictionary = {}  # request_id -> _Stream
@@ -68,6 +71,7 @@ func post_json(path: String, body: Dictionary, on_result: Callable, timeout := 6
 
 
 func stream_chat(body: Dictionary) -> void:
+	last_chat_requests[body.speaker_id] = body
 	var s := _Stream.new()
 	s.body = JSON.stringify(body)
 	_streams[body.request_id] = s
