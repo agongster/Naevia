@@ -9,10 +9,10 @@ Naevia is a cozy 2D pixel game. You mine stone, furnish a small house, and talk 
 | Part | State |
 |---|---|
 | Art package (35 PNGs + manifest) | Delivered by Ryan; re-checked 2026-10-29: all 35 match manifest sizes, all RGBA |
-| Backend (`server/`) | Implemented; mock mode works end to end; 34 pytest tests pass; live mode is tested against a fake provider only, not a real one |
-| Godot client (`client/`) | **Playable demo (milestone A) on Godot 4.7.2, macOS.** Movement, jumping, mining, furniture buy/place/move/store, pigeon and blacksmith visits, click-to-talk with streamed replies in bubbles, history, saves, and per-character memory (milestone C). The automated smoke test passes (64 checks) |
+| Backend (`server/`) | Implemented; mock mode works end to end; 36 pytest tests pass; live mode is tested against a fake provider only, not a real one |
+| Godot client (`client/`) | **Playable demo (milestone A) on Godot 4.7.2, macOS.** Movement, jumping, mining, furniture buy/place/move/store, pigeon and blacksmith visits, click-to-talk with streamed replies in bubbles, history, saves, per-character memory (milestone C), and group chat (milestone D). The automated smoke test passes (97 checks) |
 | Memory (milestone C) | **Built.** Each character has their own memory file, updated in the background after every exchange, checked by the client before it replaces the file, and kept across restarts. Verified in mock mode only |
-| Group chat (milestone D) | Not started; Invite Both is disabled |
+| Group chat (milestone D) | **Built.** Invite Both brings both characters into the house; turn-taking, `@to:` handoffs, a 3-turn cap, a shared `group.jsonl` transcript, and listeners learning shared knowledge from each other. Verified in mock mode only |
 | Windows build (`build/windows/`) | Not started; no export preset yet |
 | Live AI acceptance | Not run; no provider/model chosen yet |
 
@@ -58,6 +58,7 @@ Controls:
 - **Bag** (top left): buy a table, chair or lamp for 3 stone. Left click places it, right click cancels.
 - **Arrange** (in the Bag): click placed furniture to pick it up, then click to drop it or press **Store**. Stored pieces are placed again for free.
 - **Contacts** (top right): call the witch's pigeon or the blacksmith. They also show up on their own after about 45 s and 100 s. Click either one to talk, type in the field, and click **Send**.
+- **Contacts → Invite Both**: the witch and blacksmith walk in through the door and a group conversation opens. Name one of them ("Blacksmith, …") to have them answer first; otherwise they take turns going first. You can send again while they're talking; your message goes next. **Close** sends them home.
 - **History** shows past dialogue. **Dev** has instant contacts, Reset resources, +9 stone, and Wipe save.
 
 Launch options go after `--`:
@@ -78,7 +79,7 @@ godot --path client --fixed-fps 60 res://tests/smoke_test.tscn -- \
       --save-slot=smoke --shots=/tmp/naevia-shots --backend-url=http://127.0.0.1:8000
 ```
 
-The smoke test opens a small always-on-top window for about 10 seconds. It plays through movement, mining, furniture, both contacts, a backend failure and retry, memory updates and isolation, a failed memory update, and a reload from disk that checks memory recall, using simulated mouse and keyboard input. It also checks that the client rejects bad memory proposals. It saves screenshots to `--shots` and prints `SMOKE PASS` or `SMOKE FAIL`. `--fixed-fps 60` makes timing deterministic, because macOS throttles windows hidden behind other apps. The test refuses to run on the `default` save slot.
+The smoke test opens a small always-on-top window for about 20 seconds. It plays through movement, mining, furniture, both contacts, a backend failure and retry, memory updates and isolation, a failed memory update, a reload from disk that checks memory recall, and a group conversation (turn order, handoffs, the 3-turn cap, privacy of request context, learning from each other), using simulated mouse and keyboard input. It also checks that the client rejects bad memory proposals. It saves screenshots to `--shots` and prints `SMOKE PASS` or `SMOKE FAIL`. `--fixed-fps 60` makes timing deterministic, because macOS throttles windows hidden behind other apps. The test refuses to run on the `default` save slot.
 
 ### Live AI
 
@@ -113,7 +114,7 @@ server/
                          SSE via HTTPX, injectable transport for tests)
   app/memory.py          validate_proposal: character id, revision = base+1, cited sources must exist,
                          every event must have been heard, cursor = last event, 3,000-char cap
-  tests/                 34 tests; test_live_adapter.py fakes the provider with httpx.MockTransport
+  tests/                 36 tests; test_live_adapter.py fakes the provider with httpx.MockTransport
   .env.example           Safe defaults (mock mode). Copy to .env
   requirements.lock      Full pip freeze from Python 3.12.9
 client/
@@ -139,10 +140,11 @@ client/
                          client-side proposal checks, per-character queue, retry and restart recovery
     world.gd             Builds the TileSet and level, answers tile queries, tracks the pointer
     player_controller.gd, mining_controller.gd, furniture_controller.gd
-    conversation_coordinator.gd   Conversation/request IDs, history commits, retry; waits for a
-                                  character's memory update before asking them for a reply
+    conversation_coordinator.gd   Private and group conversations: request IDs, turn order (named →
+                                  alternate → @to: handoff, max 3 per message), queued player message,
+                                  history commits, retry; waits for a character's memory update first
     bubble_controller.gd, bubble_style.gd, hud.gd          Speech bubbles and HUD, built from native controls
-    npc.gd, pigeon.gd, contact_scheduler.gd                Visitors and the one-at-a-time invitation timers
+    npc.gd, pigeon.gd, contact_scheduler.gd                Visitors, one-at-a-time invitation timers, Invite Both
   tests/smoke_test.gd    End-to-end playthrough with simulated input and screenshots
 ```
 
@@ -156,7 +158,9 @@ How the client is put together:
 Design decisions worth knowing:
 
 - **Mock replies start with `[mock]`.** That way nobody mistakes a mock reply for a live one during acceptance.
-- **In mock mode, group chat always passes the turn.** When the player speaks in a group, the mock's first responder addresses the other character with `@to:`. That exercises the routing between characters without a live model.
+- **In mock mode, group chat always passes the turn.** When the player speaks in a group, the mock's first responder addresses the other character with `@to:`, and the other answers the player. That exercises the routing between characters without a live model. A player message containing `#chain` makes mock characters keep handing the turn back and forth, which is how the smoke test checks the 3-turn cap. Live models ignore it.
+- **Group privacy is enforced twice.** For group turns the client sends `MemoryStore.shareable(id)` (shared entries only), and the backend filters private entries again. `ApiClient.last_chat_requests` keeps the last request body per speaker in memory (never on disk), so you can inspect exactly what context a character got (SPEC 10.4-3).
+- **Group memory.** `MemoryStore.pending_events(id)` merges the character's private history with the group transcript in time order (event IDs start with a millisecond timestamp). Memory updates for both guests run when a player message's turns finish or the group closes, not between turns. A reply of just "..." counts as declining: it is not shown or saved, and the turns end.
 - **Memory is checked on both sides.** The backend checks every memory proposal (including the live model's) before returning it. `MemoryStore` checks it again before replacing the file: right character and request, revision is exactly base + 1, the processing cursor is the last event sent, every cited event was actually sent or already cited, scopes are valid, and the text fits the caps (400 per entry, 3,000 total).
 - **How memory updates flow.** History is saved first; then `MemoryStore.request_update(id)` sends the events after `last_processed_event_id` that the character heard (up to 24 at a time). One update runs per character at a time. If it fails, the old file stays, the events stay pending, and it retries after 20 s. On launch it resumes any pending events, so a crash mid-update loses nothing. A new chat request waits for that character's in-progress update, so replies always use the newest memory.
 - **Mock replies quote one memory entry** ("I remember: …"), so you can see memory working without a live model. History → Memory shows each character's current memory, revision, pending count, and last error.
@@ -175,7 +179,7 @@ Every check ID comes from SPEC §10/§12.2. Status as of 2026-10-29, commit `846
 | 10.1-3 | Move, jump, animated walk + mining | NOT RUN | Mock smoke test: walk animation plays while moving, the mine animation plays while holding, crack frames advance with progress, stone chips burst when a tile breaks |
 | 10.1-4 | Mine, buy 3 furniture types, place/move/store | NOT RUN | Mock smoke test: 3 stone mined → table bought and placed; chair and lamp placed; table moved; chair stored and placed again without paying |
 | 10.2-1 | Pigeon arrives, blacksmith visits; click to talk | NOT RUN | Mock smoke test: both arrive (timer or Contacts/Dev), and clicking each opens the right conversation. Send is a button; Enter is optional |
-| 10.2-2 | Replies in attached bubbles, no sidebar | NOT RUN | Bubbles anchor above the pigeon or blacksmith and have a tail. There is no sidebar |
+| 10.2-2 | Replies in attached bubbles, no sidebar | NOT RUN | Bubbles anchor above the pigeon or the speaking character and have a tail. In group chat both bubbles stay readable (moved sideways when there's no room above). There is no sidebar |
 | 10.2-3 | Compact/wrapping/segmented bubbles on screen | NOT RUN | Short text shrinks the bubble, long text wraps and splits at sentence boundaries ("click for more 1/3"), and bubbles are clamped on screen. Chinese text has **not** been checked: no CJK font is bundled yet |
 | 10.2-4 | Click field, type, Send; no movement/mining leak | NOT RUN | Mock smoke test: pressing D while the field is focused types into it and doesn't move the player; clicking Bag buttons doesn't place furniture behind them |
 | 10.2-5 | Play while waiting; history viewable | NOT RUN | Mock smoke test: the player walks while a reply streams. The History panel lists each character's exchanges |
@@ -185,35 +189,35 @@ Every check ID comes from SPEC §10/§12.2. Status as of 2026-10-29, commit `846
 | 10.3-4 | No guilt/penalty for ignoring | NOT RUN | An ignored visitor leaves after 60 s without saying anything, and no relationship stat exists. Live wording still unchecked |
 | 10.4-1 | Witch uses a told detail later | NOT RUN | Mock smoke test: after the player mentions exams, the witch's memory file records it (private, learned from the player), and her next reply includes "I remember: … exams …". Needs a live model to judge natural use |
 | 10.4-2 | Recall survives restart | NOT RUN | Mock smoke test: after a rebuild from disk with memory caches cleared, the witch's memory reloads from her file and her reply still recalls the exams |
-| 10.4-3 | Blacksmith not given witch's private memory | NOT RUN | Mock smoke test: the blacksmith's memory holds his own conversation and nothing about the exams; the witch's holds nothing from his. Each request carries only the speaker's own memory file |
+| 10.4-3 | Blacksmith not given witch's private memory | NOT RUN | Mock smoke test: the blacksmith's memory holds his own conversation and nothing about the exams; the witch's holds nothing from his. Each request carries only the speaker's own memory file, which the test confirms by inspecting the request bodies |
 | 10.4-4 | Exam-finished update reflected | NOT RUN | Needs a live model; the mock only appends experiences and never updates an existing situation |
-| 10.5-1 | Invite Both; shared announcement | NOT RUN | **Milestone D not built**; the Invite Both button is disabled and says so |
-| 10.5-2 | Characters address each other, correct bubbles | NOT RUN | Backend `@to:` routing tested; client group turns not built |
-| 10.5-3 | Learns shareable detail from other character | NOT RUN | Milestone D (memory side is ready) |
-| 10.5-4 | Group doesn't expose private memory; ends turns | NOT RUN | Backend withholds private entries in group prompts (tested). Client 3-turn cap not built |
+| 10.5-1 | Invite Both; shared announcement | NOT RUN | Mock smoke test: Invite Both brings both into the house and opens group mode; "I made the Dean's List!" gets replies from both. Needs a live model to judge whether replies fit |
+| 10.5-2 | Characters address each other, correct bubbles | NOT RUN | Mock smoke test: the witch addresses the blacksmith (`@to:`), he answers, and each reply is in its own speaker's bubble. History shows "Witch → Blacksmith". The spec needs a live, unscripted exchange |
+| 10.5-3 | Learns shareable detail from other character | NOT RUN | Mock smoke test: after the group closes, the witch's memory has the blacksmith's grinding-wheel news (shared, learned from the blacksmith), and it is still there after a restart |
+| 10.5-4 | Group doesn't expose private memory; ends turns | NOT RUN | Mock smoke test: both group requests hold only shared memory entries (no exams, no bellows). Characters that keep handing off stop after 3 turns, and a new player message cuts queued turns short |
 | 10.6-1 | Everything persists across restart | NOT RUN | Mock smoke test: stone, furniture, mined cells and player position all survive a rebuild from disk, and history is saved as JSONL. Both memory files reload from disk |
 | 10.6-2 | Responsive during replies + memory work | NOT RUN | Streaming is polled without blocking, and the player moved during a reply. Memory updates are non-blocking HTTP requests; with memory updates failing, chat still completed |
 | 10.6-3 | Clear failure state, retry, no duplicates | NOT RUN | Mock smoke test: with the backend unreachable, a bubble says "Can't reach the local backend… Is it running?" and offers Retry. Retry completed the exchange with exactly 2 history events (no duplicate player message) |
 | 10.7-1 | Another dev can follow setup to run everything | NOT RUN | Backend and client steps verified on macOS. Windows and export steps don't exist yet |
 | 10.7-2 | Config examples, pinned deps, no secrets | NOT RUN | `.env.example`, `requirements.lock` and Dev contact triggers exist; `.env` is gitignored. Known issues are listed below |
 
-**Summary: 0 / 26 PASS.** 14 checks have supporting evidence from the mock smoke test on macOS. Group chat (D), a live model, and the Windows build (E) are still needed before any check can pass.
+**Summary: 0 / 26 PASS.** 18 checks have supporting evidence from the mock smoke test on macOS. Milestones A–D are built. A live model and the Windows build (milestone E) are still needed before any check can pass.
 
 ### Known issues and placeholders
 
 - **No CJK font is bundled.** Godot's default font plus system fallback renders English. Chinese has not been checked. SPEC §3.3 requires a bundled, redistributable English/Chinese font.
 - **Mock memory only appends.** The mock records each thing the player said as an experience and drops the oldest when over 3,000 characters. Real consolidation (facts, ongoing situations, merging duplicates) depends on the live model and is untested.
-- **The smoke test fights macOS focus.** macOS gives focus back to the launching app about 3 s into a run, and Godot releases held buttons on focus loss. The test retakes focus and re-presses held buttons. If it still fails at random, keep the test window in front.
-- **Invite Both is disabled** until milestone D. The witch's scene exists but is never shown yet.
+- **The smoke test fights macOS focus.** macOS gives focus back to the launching app about 3 s into a run, and Godot releases held buttons on focus loss. The test retakes focus and re-presses held buttons. If you use the computer during a run, focus keeps moving and mining or click checks can fail. The test then prints how many times focus was lost; rerun without touching anything.
+- **Mock group text reads oddly** ("I'm restoring … he found … myself"), because the mock pastes the profile's third-person situation into a first-person sentence. Live replies don't do this.
+- **The witch only appears in person during Invite Both.** Privately, she is reached by pigeon, as the spec describes.
 - **Furniture placement is forgiving.** It drops onto the first solid floor under the cursor, anywhere in the world, not just inside the house.
 - **The player's own messages don't appear as a bubble.** They show only in History.
 - **Mined tiles stay gone.** Only the Dev "Reset resources" button restores them.
 
 ## Next steps for whoever picks this up
 
-1. **Milestone D (group):** Invite Both brings the witch and blacksmith into the house, alternates or targets turns, honors `@to:` addressees, caps character turns at 3 per player message, and writes `history/group.jsonl`. For memory, extend `MemoryStore.pending_events()` to merge `group.jsonl` events the character heard (in time order) with their private history, and keep `share_scope` "shared" for public speech.
-2. Choose a provider and model, then run one live smoke test (SPEC §11.2).
-3. Bundle an English/Chinese font with a license that allows redistribution. Ryan's package doesn't include one, by design.
-4. Add the `Windows Desktop` export preset, export from macOS, and run the two acceptance sessions in SPEC §10 on a Windows PC.
+1. Choose a provider and model, then run one live smoke test (SPEC §11.2). Check that the model actually uses `@to:` in group chat and returns memory snapshots the validators accept.
+2. Bundle an English/Chinese font with a license that allows redistribution. Ryan's package doesn't include one, by design.
+3. **Milestone E:** add the `Windows Desktop` export preset, export from macOS, and run the two acceptance sessions in SPEC §10 on a Windows PC.
 
 See [HANDOFF_REPORT.md](HANDOFF_REPORT.md) for an assessment of the inherited work, and [prompt_log.md](prompt_log.md) for the AI-assisted development log.
