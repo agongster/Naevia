@@ -90,6 +90,17 @@ README status, code map and acceptance notes were updated (still 0/26 PASS; mock
 
 README status, controls, code map and acceptance notes were updated (0/26 PASS; mock evidence for 18 checks).
 
+### 9. 2026-10-30
+
+> I have my API key. where should i put it? make sure this is not committed.
+
+**Outcome:** Claude pointed to `server/.env` and checked the safeguards:
+- `git check-ignore` confirms `server/.env` is ignored by `.gitignore`.
+- `git log --all` shows it has never been committed; only `.env.example` (with a placeholder) is tracked.
+- The backend uses the key only in the `Authorization` header and doesn't log it.
+
+Claude asked for the key to be pasted into the file directly, not into the chat. No code changed.
+
 ## Times the AI did something I didn't want
 
 ### A. Trimmed real dependencies out of the lock file
