@@ -1,7 +1,8 @@
 class_name ConversationCoordinator
 extends Node
 ## ConversationCoordinator: participants, speaker order, and conversation IDs (SPEC 4.2, 4.3).
-## Private mode only so far; group mode (Invite Both) is milestone D.
+## Private mode only so far; group mode (Invite Both) is milestone D. Each completed
+## exchange queues a MemoryStore update for the character who heard it.
 ## Request IDs guard against late replies landing in a different conversation.
 
 signal opened
@@ -80,8 +81,15 @@ func retry() -> void:
 func _request_reply() -> void:
 	last_error = ""
 	_reply = ""
-	pending_request = _new_id("r")
+	var request := _new_id("r")
+	pending_request = request
 	world.ui.bubbles.show_waiting(anchor, label)
+	state_changed.emit()
+	# Context uses the newest memory (SPEC 6.2 step 1); the world keeps running meanwhile.
+	while MemoryStore.is_updating(character_id):
+		await MemoryStore.settled
+	if pending_request != request:
+		return  # closed while waiting
 	var recent: Array = []
 	for ev in SaveManager.read_history(character_id, RECENT_LIMIT):
 		recent.append({"event_id": ev.event_id, "speaker": ev.speaker, "addressee": ev.addressee,
@@ -92,11 +100,10 @@ func _request_reply() -> void:
 		"speaker_id": character_id,
 		"participants": ["player", character_id],
 		"profile": Defs.characters[character_id],
-		"memory": _empty_memory(character_id),  # MemoryStore arrives with milestone C
+		"memory": MemoryStore.get_memory(character_id),
 		"recent_messages": recent,
 		"scene_context": scene_context,
 	})
-	state_changed.emit()
 
 
 func _on_delta(request_id: String, text: String) -> void:
@@ -113,6 +120,7 @@ func _on_done(request_id: String, speaker_id: String, addressee: String) -> void
 	pending_request = ""
 	var text := _reply.strip_edges()
 	SaveManager.append_history(character_id, _event(speaker_id, addressee, text))
+	MemoryStore.request_update(character_id)  # history is saved first, so a restart can resume it
 	world.ui.bubbles.show_text(anchor, label, text, false)
 	state_changed.emit()
 
@@ -136,11 +144,6 @@ func _event(speaker: String, addressee: String, text: String) -> Dictionary:
 		"text": text,
 		"time": Time.get_datetime_string_from_system(true),
 	}
-
-
-static func _empty_memory(id: String) -> Dictionary:
-	return {"schema_version": 1, "character_id": id, "revision": 0, "last_processed_event_id": null,
-		"facts": [], "ongoing": [], "experiences": []}
 
 
 static func _new_id(prefix: String) -> String:

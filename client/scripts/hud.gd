@@ -25,6 +25,8 @@ var _dev_panel: PanelContainer
 var _history_panel: PanelContainer
 var _history_list: VBoxContainer
 var _history_key := "witch"
+var _history_title: Label
+var _show_memory := false
 var _reply_panel: PanelContainer
 var _reply_to: Label
 var _reply_field: LineEdit
@@ -141,6 +143,7 @@ func _build_dev() -> void:
 		["Reset resources", world.reset_resources],
 		["+9 stone", func() -> void: SaveManager.add_material("item.stone", 9)],
 		["Check backend", ApiClient.check_health],
+		["Update memories now", MemoryStore.update_all],
 		["Wipe save + reload", func() -> void:
 			SaveManager.wipe_slot()
 			get_tree().reload_current_scene()],
@@ -165,17 +168,26 @@ func _popup_panel(entries: Array) -> PanelContainer:
 func _build_history() -> void:
 	_history_panel = PanelContainer.new()
 	_history_panel.visible = false
-	_history_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	_history_panel.custom_minimum_size = Vector2(380, 220)
-	_history_panel.position = Vector2(130, 60)
+	# Fixed 400 x 240 box centered on screen; the list scrolls inside it.
+	_history_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_history_panel.offset_left = -200
+	_history_panel.offset_right = 200
+	_history_panel.offset_top = -120
+	_history_panel.offset_bottom = 120
+	_history_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_history_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	var v := VBoxContainer.new()
 	_history_panel.add_child(v)
 	var tabs := HBoxContainer.new()
-	tabs.add_child(_label("History", 11))
+	_history_title = _label("History", 11)
+	tabs.add_child(_history_title)
 	for key in Defs.characters:
 		tabs.add_child(_button(Defs.characters[key].name, func() -> void:
 			_history_key = key
 			_refresh_history()))
+	tabs.add_child(_button("Memory", func() -> void:
+		_show_memory = not _show_memory
+		_refresh_history()))
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	tabs.add_child(spacer)
@@ -189,6 +201,9 @@ func _build_history() -> void:
 	scroll.add_child(_history_list)
 	v.add_child(scroll)
 	_root.add_child(_history_panel)
+	MemoryStore.updated.connect(func(id: String) -> void:
+		if _history_panel.visible and id == _history_key:
+			_refresh_history())
 
 
 func _build_reply() -> void:
@@ -256,15 +271,37 @@ func _refresh_reply() -> void:
 func _refresh_history() -> void:
 	for c in _history_list.get_children():
 		c.queue_free()
+	if _show_memory:
+		_refresh_memory()
+		return
+	_history_title.text = "History"
 	var events := SaveManager.read_history(_history_key)
 	if events.is_empty():
 		_history_list.add_child(_label("No conversations yet.", 10))
 	for ev in events:
 		var who: String = "You" if ev.speaker == "player" else Defs.characters.get(ev.speaker, {"name": ev.speaker}).name
-		var l := _label("%s: %s" % [who, ev.text], 10)
-		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		l.custom_minimum_size.x = 340
-		_history_list.add_child(l)
+		_history_list.add_child(_wrapped("%s: %s" % [who, ev.text], 10))
+
+
+## What the selected character currently remembers, with where each entry came from.
+func _refresh_memory() -> void:
+	_history_title.text = "Memory"
+	var m := MemoryStore.get_memory(_history_key)
+	var status := "%s · revision %d · %d new event(s) not yet remembered" % [
+		Defs.characters[_history_key].name, int(m.revision), MemoryStore.pending_events(_history_key).size()]
+	if MemoryStore.is_updating(_history_key):
+		status += " · updating…"
+	elif MemoryStore.last_error.has(_history_key):
+		status += " · last update failed: " + MemoryStore.last_error[_history_key]
+	_history_list.add_child(_wrapped(status, 9))
+	var any := false
+	for section in MemoryStore.SECTIONS:
+		for entry in m[section]:
+			any = true
+			_history_list.add_child(_wrapped("[%s · %s · from %s] %s" % [
+				section, entry.share_scope, entry.learned_from, entry.text], 10))
+	if not any:
+		_history_list.add_child(_label("Nothing remembered yet.", 10))
 
 
 func _on_health(ok: bool, mode: String) -> void:
@@ -306,6 +343,13 @@ func _label(text: String, font_size: int) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", font_size)
+	return l
+
+
+func _wrapped(text: String, font_size: int) -> Label:
+	var l := _label(text, font_size)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size.x = 340
 	return l
 
 

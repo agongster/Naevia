@@ -4,6 +4,8 @@ extends Node
 ## a separate slot (for fresh-save testing without touching the real save).
 
 signal inventory_changed
+## Emitted after wipe_slot(), so other stores can drop cached state.
+signal wiped
 
 const SCHEMA_VERSION := 1
 
@@ -159,3 +161,4 @@ func wipe_slot() -> void:
 			for f in d.get_files():
 				d.remove(f)
 	world = _default_world()
+	wiped.emit()

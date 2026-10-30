@@ -1,6 +1,6 @@
 extends Node
-## ApiClient: /health via HTTPRequest; streamed /v1/chat via a polled HTTPClient so
-## the game loop never blocks (SPEC 5.3). Events are newline-delimited JSON.
+## ApiClient: /health and /v1/memory/update via HTTPRequest; streamed /v1/chat via a
+## polled HTTPClient so the game loop never blocks (SPEC 5.3). Events are newline-delimited JSON.
 
 signal text_delta(request_id: String, text: String)
 signal reply_done(request_id: String, speaker_id: String, addressee: String)
@@ -47,6 +47,24 @@ func check_health() -> void:
 	if req.request(base_url + "/health") != OK:
 		req.queue_free()
 		health_checked.emit(false, "")
+
+
+## One-shot JSON POST (memory updates). Calls on_result(code, data); code 0 means
+## the backend could not be reached.
+func post_json(path: String, body: Dictionary, on_result: Callable, timeout := 60.0) -> void:
+	var req := HTTPRequest.new()
+	req.timeout = timeout
+	add_child(req)
+	req.request_completed.connect(func(result: int, code: int, _headers, raw: PackedByteArray) -> void:
+		req.queue_free()
+		if result != HTTPRequest.RESULT_SUCCESS:
+			on_result.call(0, null)
+		else:
+			on_result.call(code, JSON.parse_string(raw.get_string_from_utf8())))
+	var headers := ["Content-Type: application/json"]
+	if req.request(base_url + path, headers, HTTPClient.METHOD_POST, JSON.stringify(body)) != OK:
+		req.queue_free()
+		on_result.call(0, null)
 
 
 func stream_chat(body: Dictionary) -> void:
