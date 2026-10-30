@@ -13,7 +13,7 @@ Naevia is a cozy 2D pixel game. You mine stone, furnish a small house, and talk 
 | Godot client (`client/`) | **Playable demo (milestone A) on Godot 4.7.2, macOS.** Movement, jumping, mining, furniture buy/place/move/store, pigeon and blacksmith visits, click-to-talk with streamed replies in bubbles, history, saves, per-character memory (milestone C), and group chat (milestone D). The automated smoke test passes (97 checks) |
 | Memory (milestone C) | **Built.** Each character has their own memory file, updated in the background after every exchange, checked by the client before it replaces the file, and kept across restarts. Verified in mock mode only |
 | Group chat (milestone D) | **Built.** Invite Both brings both characters into the house; turn-taking, `@to:` handoffs, a 3-turn cap, a shared `group.jsonl` transcript, and listeners learning shared knowledge from each other. Verified in mock mode only |
-| Windows build (`build/windows/`) | Not started; no export preset yet |
+| Windows build (`build/windows/`) | **Exported 2026-10-30** from macOS with Godot 4.7.2 official templates: `Naevia.exe` (game, data embedded) and `Naevia.console.exe` (same game with a console for error output). The export's data package was run on macOS and renders the full world, but the `.exe` itself **has not been run on Windows yet**. Not in git (110 MB); see below |
 | Live AI | **Live smoke test run 2026-10-30** (SPEC §11.2) with OpenAI `gpt-4o-mini`, base URL `https://api.openai.com/v1`, on macOS. The in-game live check passes. Formal acceptance still needs the Windows build |
 
 ## Running it
@@ -43,6 +43,31 @@ py -3.12 -m venv .venv
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --env-file .env
 ```
+
+### Playing the Windows build
+
+You need the exported build (`Naevia-windows-x86_64.zip`, see *Exporting for Windows* below) plus this repository for the backend. It's a two-process launch, as SPEC §11.4 allows:
+
+1. Install Python 3.12 and start the backend with the PowerShell commands above. For live AI, fill in `server\.env` first; mock mode works without a key.
+2. Unzip the build anywhere and double-click `Naevia.exe`. No Godot editor is needed. The build is unsigned, so Windows SmartScreen may warn: choose **More info → Run anyway**.
+3. If something goes wrong, run `Naevia.console.exe` instead, from the same folder. It is the same game with a console window that shows error output.
+
+The game connects to `http://127.0.0.1:8000`. To use another port, run `Naevia.exe -- --backend-url=http://127.0.0.1:8010`. Saves go to `%APPDATA%\Godot\app_userdata\Naevia\saves\default\`; add `-- --save-slot=test` to test with a fresh save. If the backend isn't running, the game still plays and conversations show a Retry button.
+
+### Exporting for Windows
+
+The checked-in preset `client/export_presets.cfg` is named `Windows Desktop`. It embeds the game data in the `.exe`, includes the `.json` data files (the game reads them directly, so the default export would leave them out), and excludes `tests/`. Steps used on 2026-10-30 (macOS, Godot 4.7.2):
+
+1. Install the matching export templates. In the editor: **Editor → Manage Export Templates → Download and Install**. Or by hand: download `Godot_v4.7.2-stable_export_templates.tpz` from the Godot 4.7.2 GitHub release, check it against that release's `SHA512-SUMS.txt`, and unzip `templates/version.txt` and `templates/windows_*_x86_64*.exe` into `~/Library/Application Support/Godot/export_templates/4.7.2.stable/` (Windows: `%APPDATA%\Godot\export_templates\4.7.2.stable\`).
+2. Export:
+   ```bash
+   mkdir -p build/windows
+   godot --headless --path client --export-release "Windows Desktop" ../build/windows/Naevia.exe
+   ```
+   Output: `build/windows/Naevia.exe` (about 110 MB) and `build/windows/Naevia.console.exe`.
+3. Zip both for sharing: `cd build/windows && zip -9 ../Naevia-windows-x86_64.zip Naevia.exe Naevia.console.exe` (about 38 MB).
+
+`build/` is in `.gitignore`, because GitHub rejects files over 100 MB. Share the zip some other way, for example as a GitHub Release attachment. No API key is in the build; the key lives only in `server/.env`.
 
 ### Game client
 
@@ -190,13 +215,13 @@ Every check ID comes from SPEC §10/§12.2. Status as of 2026-10-29, commit `846
 
 | ID | Requirement (short) | Status | Evidence so far / remaining work |
 |---|---|---|---|
-| 10.1-1 | Open Windows build, enter home + mining area | NOT RUN | Works on macOS from the editor/CLI. No Windows export preset or build yet |
+| 10.1-1 | Open Windows build, enter home + mining area | NOT RUN | Windows build exported (`build/windows/Naevia.exe`). Its data package was run on macOS and showed the home and mining area. Needs a run on a Windows PC |
 | 10.1-2 | Coherent tile/character proportions | NOT RUN | 16 px tiles and a 20×42 player collider; the scene is assembled from Ryan's art and matches his `scene_direction.png` layout. Needs an owner's visual sign-off |
 | 10.1-3 | Move, jump, animated walk + mining | NOT RUN | Mock smoke test: walk animation plays while moving, the mine animation plays while holding, crack frames advance with progress, stone chips burst when a tile breaks |
 | 10.1-4 | Mine, buy 3 furniture types, place/move/store | NOT RUN | Mock smoke test: 3 stone mined → table bought and placed; chair and lamp placed; table moved; chair stored and placed again without paying |
 | 10.2-1 | Pigeon arrives, blacksmith visits; click to talk | NOT RUN | Mock smoke test: both arrive (timer or Contacts/Dev), and clicking each opens the right conversation. Send is a button; Enter is optional |
 | 10.2-2 | Replies in attached bubbles, no sidebar | NOT RUN | Bubbles anchor above the pigeon or the speaking character and have a tail. In group chat both bubbles stay readable (moved sideways when there's no room above). There is no sidebar |
-| 10.2-3 | Compact/wrapping/segmented bubbles on screen | NOT RUN | Short text shrinks the bubble, long text wraps and splits at sentence boundaries ("click for more 1/3"), and bubbles are clamped on screen. Chinese text has **not** been checked: no CJK font is bundled yet |
+| 10.2-3 | Compact/wrapping/segmented bubbles on screen | NOT RUN | Short text shrinks the bubble, long text wraps and splits at sentence boundaries ("click for more 1/3"), and bubbles are clamped on screen. Chinese text has **not** been checked: the project owner decided on 2026-10-30 not to bundle a Chinese-capable font for this phase (proposal P12) |
 | 10.2-4 | Click field, type, Send; no movement/mining leak | NOT RUN | Mock smoke test: pressing D while the field is focused types into it and doesn't move the player; clicking Bag buttons doesn't place furniture behind them |
 | 10.2-5 | Play while waiting; history viewable | NOT RUN | Mock smoke test: the player walks while a reply streams. The History panel lists each character's exchanges |
 | 10.3-1 | Both characters answer unscripted via live API | NOT RUN | Live check on macOS (gpt-4o-mini): both characters answered new messages in the game, streaming into their bubbles (first text after 0.5–3 s). Not yet in the Windows build |
@@ -214,14 +239,15 @@ Every check ID comes from SPEC §10/§12.2. Status as of 2026-10-29, commit `846
 | 10.6-1 | Everything persists across restart | NOT RUN | Mock smoke test: stone, furniture, mined cells and player position all survive a rebuild from disk, and history is saved as JSONL. Both memory files reload from disk |
 | 10.6-2 | Responsive during replies + memory work | NOT RUN | Streaming is polled without blocking, and the player moved during a reply. Memory updates are non-blocking HTTP requests; with memory updates failing, chat still completed |
 | 10.6-3 | Clear failure state, retry, no duplicates | NOT RUN | Mock smoke test: with the backend unreachable, a bubble says "Can't reach the local backend… Is it running?" and offers Retry. Retry completed the exchange with exactly 2 history events (no duplicate player message) |
-| 10.7-1 | Another dev can follow setup to run everything | NOT RUN | Backend and client steps verified on macOS. Windows and export steps don't exist yet |
+| 10.7-1 | Another dev can follow setup to run everything | NOT RUN | Backend, client, live and export steps verified on macOS and written above. The Windows run steps are written but untested |
 | 10.7-2 | Config examples, pinned deps, no secrets | NOT RUN | `.env.example`, `requirements.lock` and Dev contact triggers exist; `.env` is gitignored. Known issues are listed below |
 
-**Summary: 0 / 26 PASS.** 21 checks have supporting evidence from macOS: mock smoke tests, plus live runs with `gpt-4o-mini` for the conversation checks. Milestones A–D are built and live mode works. SPEC §10 only counts the Windows build, so milestone E (Windows export and a Windows acceptance session) is what stands between this and passing checks.
+**Summary: 0 / 26 PASS.** 21 checks have supporting evidence from macOS: mock smoke tests, plus live runs with `gpt-4o-mini` for the conversation checks. Milestones A–D are built and live mode works. The Windows build is exported (milestone E, first half). SPEC §10 only counts play sessions in that build, so what remains is running it on a Windows PC with the live backend and recording the results here.
 
 ### Known issues and placeholders
 
-- **No CJK font is bundled.** Godot's default font plus system fallback renders English. Chinese has not been checked. SPEC §3.3 requires a bundled, redistributable English/Chinese font.
+- **No CJK font is bundled, by decision.** On 2026-10-30 the project owner (April Gong) decided to leave out SPEC §3.3's Chinese-capable font for this phase (proposal P12). Godot's default font renders English. Chinese text may show as missing glyphs.
+- **The Windows build has not been run on Windows.** It was exported and its data package tested on macOS. There is no Windows machine here and no Wine.
 - **Mock memory only appends.** The mock records each thing the player said as an experience and drops the oldest when over 3,000 characters. Real consolidation (facts, ongoing situations, merging duplicates) depends on the live model and is untested.
 - **The smoke test fights macOS focus.** macOS gives focus back to the launching app about 3 s into a run, and Godot releases held buttons on focus loss. The test retakes focus and re-presses held buttons. If you use the computer during a run, focus keeps moving and mining or click checks can fail. The test then prints how many times focus was lost; rerun without touching anything.
 - **Mock group text reads oddly** ("I'm restoring … he found … myself"), because the mock pastes the profile's third-person situation into a first-person sentence. Live replies don't do this.
@@ -233,7 +259,7 @@ Every check ID comes from SPEC §10/§12.2. Status as of 2026-10-29, commit `846
 ## Next steps for whoever picks this up
 
 1. Live model quality: try 10.4-4 (tell the witch the exam is over) and watch whether character-to-character talk happens often enough with `gpt-4o-mini`. If not, try a stronger model. Only `.env` changes.
-2. Bundle an English/Chinese font with a license that allows redistribution. Ryan's package doesn't include one, by design.
-3. **Milestone E:** add the `Windows Desktop` export preset, export from macOS, and run the two acceptance sessions in SPEC §10 on a Windows PC.
+2. **Finish milestone E on a Windows PC:** set up the backend with the PowerShell commands, run `Naevia.exe`, do the two acceptance sessions in SPEC §10 with a live model, and fill in the acceptance table. Report anything that only breaks on Windows (fonts, paths, firewall prompts for the backend).
+3. (Deferred by the owner) Bundle an English/Chinese font with a license that allows redistribution.
 
 See [HANDOFF_REPORT.md](HANDOFF_REPORT.md) for an assessment of the inherited work, and [prompt_log.md](prompt_log.md) for the AI-assisted development log.
