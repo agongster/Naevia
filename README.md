@@ -9,12 +9,12 @@ Naevia is a cozy 2D pixel game. You mine stone, furnish a small house, and talk 
 | Part | State |
 |---|---|
 | Art package (35 PNGs + manifest) | Delivered by Ryan; re-checked 2026-10-29: all 35 match manifest sizes, all RGBA |
-| Backend (`server/`) | Implemented; mock mode works end to end; 36 pytest tests pass; live mode is tested against a fake provider only, not a real one |
+| Backend (`server/`) | Implemented; mock and live mode work end to end; 49 pytest tests pass; live mode verified with OpenAI `gpt-4o-mini` on 2026-10-30 |
 | Godot client (`client/`) | **Playable demo (milestone A) on Godot 4.7.2, macOS.** Movement, jumping, mining, furniture buy/place/move/store, pigeon and blacksmith visits, click-to-talk with streamed replies in bubbles, history, saves, per-character memory (milestone C), and group chat (milestone D). The automated smoke test passes (97 checks) |
 | Memory (milestone C) | **Built.** Each character has their own memory file, updated in the background after every exchange, checked by the client before it replaces the file, and kept across restarts. Verified in mock mode only |
 | Group chat (milestone D) | **Built.** Invite Both brings both characters into the house; turn-taking, `@to:` handoffs, a 3-turn cap, a shared `group.jsonl` transcript, and listeners learning shared knowledge from each other. Verified in mock mode only |
 | Windows build (`build/windows/`) | Not started; no export preset yet |
-| Live AI acceptance | Not run; no provider/model chosen yet |
+| Live AI | **Live smoke test run 2026-10-30** (SPEC §11.2) with OpenAI `gpt-4o-mini`, base URL `https://api.openai.com/v1`, on macOS. The in-game live check passes. Formal acceptance still needs the Windows build |
 
 ## Running it
 
@@ -83,7 +83,19 @@ The smoke test opens a small always-on-top window for about 20 seconds. It plays
 
 ### Live AI
 
-In `server/.env`, set `NAEVIA_MODEL_MODE=live` and fill in the three `NAEVIA_PROVIDER_*` / `NAEVIA_MODEL` values. **The base URL includes the version prefix** (for example `https://api.openai.com/v1`); the adapter appends `/chat/completions`. Restart uvicorn. The server refuses to start in live mode if any of the three values is missing. Never commit `.env`.
+In `server/.env`, set `NAEVIA_MODEL_MODE=live` and fill in the three `NAEVIA_PROVIDER_*` / `NAEVIA_MODEL` values. **The base URL includes the version prefix** (for example `https://api.openai.com/v1`); the adapter appends `/chat/completions`. Restart uvicorn. The server refuses to start in live mode if any of the three values is missing. Never commit `.env`; it is in `.gitignore`.
+
+Tested with `NAEVIA_PROVIDER_BASE_URL=https://api.openai.com/v1` and `NAEVIA_MODEL=gpt-4o-mini`. Two live checks exist, and each makes about 10–15 model calls:
+
+```bash
+# in the real game: private chats, streaming into bubbles, group chat, memory, request privacy
+godot --path client --fixed-fps 60 res://tests/live_check.tscn -- \
+      --save-slot=live --shots=/tmp/naevia-live --backend-url=http://127.0.0.1:8000
+# backend only: prints replies, streaming timing, memory proposals, and three group trials
+cd server && .venv/bin/python tools/live_check.py http://127.0.0.1:8000 ../client/data/characters
+```
+
+Live replies differ every run, so these assert structure (streaming, no markers, privacy, accepted memory) and print the replies for a person to judge. Results from 2026-10-30 are in the acceptance report below.
 
 ### Trying the chat endpoint by hand
 
@@ -114,7 +126,8 @@ server/
                          SSE via HTTPX, injectable transport for tests)
   app/memory.py          validate_proposal: character id, revision = base+1, cited sources must exist,
                          every event must have been heard, cursor = last event, 3,000-char cap
-  tests/                 36 tests; test_live_adapter.py fakes the provider with httpx.MockTransport
+  tests/                 49 tests; test_live_adapter.py fakes the provider with httpx.MockTransport
+  tools/live_check.py    Backend-only live check (prints replies, memory proposals, group trials)
   .env.example           Safe defaults (mock mode). Copy to .env
   requirements.lock      Full pip freeze from Python 3.12.9
 client/
@@ -145,7 +158,8 @@ client/
                                   history commits, retry; waits for a character's memory update first
     bubble_controller.gd, bubble_style.gd, hud.gd          Speech bubbles and HUD, built from native controls
     npc.gd, pigeon.gd, contact_scheduler.gd                Visitors, one-at-a-time invitation timers, Invite Both
-  tests/smoke_test.gd    End-to-end playthrough with simulated input and screenshots
+  tests/smoke_test.gd    End-to-end playthrough with simulated input and screenshots (mock backend)
+  tests/live_check.gd    Same helpers against a live backend: structural checks, prints replies
 ```
 
 How the client is put together:
@@ -160,6 +174,8 @@ Design decisions worth knowing:
 - **Mock replies start with `[mock]`.** That way nobody mistakes a mock reply for a live one during acceptance.
 - **In mock mode, group chat always passes the turn.** When the player speaks in a group, the mock's first responder addresses the other character with `@to:`, and the other answers the player. That exercises the routing between characters without a live model. A player message containing `#chain` makes mock characters keep handing the turn back and forth, which is how the smoke test checks the 3-turn cap. Live models ignore it.
 - **Group privacy is enforced twice.** For group turns the client sends `MemoryStore.shareable(id)` (shared entries only), and the backend filters private entries again. `ApiClient.last_chat_requests` keeps the last request body per speaker in memory (never on disk), so you can inspect exactly what context a character got (SPEC 10.4-3).
+- **Group turns.** A message to everyone gives each character a turn (they may decline with "..."); a named character answers alone unless they hand off. This rule came from the live test: with only nominated turns, a live model usually answered the player, so the second character never spoke.
+- **Share scope is enforced by code.** A memory entry citing anything said privately is forced to `private` by both the backend and `MemoryStore`, whatever the model labeled it. In live testing the model labeled a private exam conversation "shared", which put it into a group prompt.
 - **Group memory.** `MemoryStore.pending_events(id)` merges the character's private history with the group transcript in time order (event IDs start with a millisecond timestamp). Memory updates for both guests run when a player message's turns finish or the group closes, not between turns. A reply of just "..." counts as declining: it is not shown or saved, and the turns end.
 - **Memory is checked on both sides.** The backend checks every memory proposal (including the live model's) before returning it. `MemoryStore` checks it again before replacing the file: right character and request, revision is exactly base + 1, the processing cursor is the last event sent, every cited event was actually sent or already cited, scopes are valid, and the text fits the caps (400 per entry, 3,000 total).
 - **How memory updates flow.** History is saved first; then `MemoryStore.request_update(id)` sends the events after `last_processed_event_id` that the character heard (up to 24 at a time). One update runs per character at a time. If it fails, the old file stays, the events stay pending, and it retries after 20 s. On launch it resumes any pending events, so a crash mid-update loses nothing. A new chat request waits for that character's in-progress update, so replies always use the newest memory.
@@ -183,16 +199,16 @@ Every check ID comes from SPEC §10/§12.2. Status as of 2026-10-29, commit `846
 | 10.2-3 | Compact/wrapping/segmented bubbles on screen | NOT RUN | Short text shrinks the bubble, long text wraps and splits at sentence boundaries ("click for more 1/3"), and bubbles are clamped on screen. Chinese text has **not** been checked: no CJK font is bundled yet |
 | 10.2-4 | Click field, type, Send; no movement/mining leak | NOT RUN | Mock smoke test: pressing D while the field is focused types into it and doesn't move the player; clicking Bag buttons doesn't place furniture behind them |
 | 10.2-5 | Play while waiting; history viewable | NOT RUN | Mock smoke test: the player walks while a reply streams. The History panel lists each character's exchanges |
-| 10.3-1 | Both characters answer unscripted via live API | BLOCKED | No provider/key. Live adapter only tested against a fake provider |
-| 10.3-2 | Distinct voices, own lives | NOT RUN | Profiles written in `client/data/characters/` (starter defaults from SPEC §4.3). Needs a live model to judge |
-| 10.3-3 | Brief, non-generic replies | NOT RUN | Instructions ask for 1–3 sentences and no reflexive praise |
+| 10.3-1 | Both characters answer unscripted via live API | NOT RUN | Live check on macOS (gpt-4o-mini): both characters answered new messages in the game, streaming into their bubbles (first text after 0.5–3 s). Not yet in the Windows build |
+| 10.3-2 | Distinct voices, own lives | NOT RUN | Live: the witch is dry and wry ("Statistics can be a tricky beast"), the blacksmith warm and plain. Both bring up their own lives unprompted (the stubborn sideways plant, the grinding wheel) |
+| 10.3-3 | Brief, non-generic replies | NOT RUN | Live replies were 1–3 sentences and responded to what was said. The group answers to "Dean's List" leaned toward stock congratulations ("That's great news! Congrats!") |
 | 10.3-4 | No guilt/penalty for ignoring | NOT RUN | An ignored visitor leaves after 60 s without saying anything, and no relationship stat exists. Live wording still unchecked |
-| 10.4-1 | Witch uses a told detail later | NOT RUN | Mock smoke test: after the player mentions exams, the witch's memory file records it (private, learned from the player), and her next reply includes "I remember: … exams …". Needs a live model to judge natural use |
+| 10.4-1 | Witch uses a told detail later | NOT RUN | Mock smoke test: after the player mentions exams, the witch's memory file records it (private, learned from the player), and her next reply includes "I remember: … exams …". Live: after being told about a Thursday statistics exam, the witch's memory recorded it as a private fact. Asked later "what should I do the night before?", she answered for an exam night ("A good night's sleep is worth more than cramming") without naming the date |
 | 10.4-2 | Recall survives restart | NOT RUN | Mock smoke test: after a rebuild from disk with memory caches cleared, the witch's memory reloads from her file and her reply still recalls the exams |
 | 10.4-3 | Blacksmith not given witch's private memory | NOT RUN | Mock smoke test: the blacksmith's memory holds his own conversation and nothing about the exams; the witch's holds nothing from his. Each request carries only the speaker's own memory file, which the test confirms by inspecting the request bodies |
-| 10.4-4 | Exam-finished update reflected | NOT RUN | Needs a live model; the mock only appends experiences and never updates an existing situation |
+| 10.4-4 | Exam-finished update reflected | NOT RUN | Not yet tried live. The memory instructions now ask the model to update or remove ongoing situations when they change |
 | 10.5-1 | Invite Both; shared announcement | NOT RUN | Mock smoke test: Invite Both brings both into the house and opens group mode; "I made the Dean's List!" gets replies from both. Needs a live model to judge whether replies fit |
-| 10.5-2 | Characters address each other, correct bubbles | NOT RUN | Mock smoke test: the witch addresses the blacksmith (`@to:`), he answers, and each reply is in its own speaker's bubble. History shows "Witch → Blacksmith". The spec needs a live, unscripted exchange |
+| 10.5-2 | Characters address each other, correct bubbles | NOT RUN | Mock smoke test: the witch addresses the blacksmith (`@to:`), he answers, and each reply is in its own speaker's bubble. History shows "Witch → Blacksmith". Live (backend check, 1 of 3 group trials): the blacksmith answered the witch's remark about her plant (`@to:witch`) and she asked him about his grinding wheel (`@to:blacksmith`). In the in-game live run, both answered the player instead. Character-to-character talk happens, but not every time |
 | 10.5-3 | Learns shareable detail from other character | NOT RUN | Mock smoke test: after the group closes, the witch's memory has the blacksmith's grinding-wheel news (shared, learned from the blacksmith), and it is still there after a restart |
 | 10.5-4 | Group doesn't expose private memory; ends turns | NOT RUN | Mock smoke test: both group requests hold only shared memory entries (no exams, no bellows). Characters that keep handing off stop after 3 turns, and a new player message cuts queued turns short |
 | 10.6-1 | Everything persists across restart | NOT RUN | Mock smoke test: stone, furniture, mined cells and player position all survive a rebuild from disk, and history is saved as JSONL. Both memory files reload from disk |
@@ -201,7 +217,7 @@ Every check ID comes from SPEC §10/§12.2. Status as of 2026-10-29, commit `846
 | 10.7-1 | Another dev can follow setup to run everything | NOT RUN | Backend and client steps verified on macOS. Windows and export steps don't exist yet |
 | 10.7-2 | Config examples, pinned deps, no secrets | NOT RUN | `.env.example`, `requirements.lock` and Dev contact triggers exist; `.env` is gitignored. Known issues are listed below |
 
-**Summary: 0 / 26 PASS.** 18 checks have supporting evidence from the mock smoke test on macOS. Milestones A–D are built. A live model and the Windows build (milestone E) are still needed before any check can pass.
+**Summary: 0 / 26 PASS.** 21 checks have supporting evidence from macOS: mock smoke tests, plus live runs with `gpt-4o-mini` for the conversation checks. Milestones A–D are built and live mode works. SPEC §10 only counts the Windows build, so milestone E (Windows export and a Windows acceptance session) is what stands between this and passing checks.
 
 ### Known issues and placeholders
 
@@ -216,7 +232,7 @@ Every check ID comes from SPEC §10/§12.2. Status as of 2026-10-29, commit `846
 
 ## Next steps for whoever picks this up
 
-1. Choose a provider and model, then run one live smoke test (SPEC §11.2). Check that the model actually uses `@to:` in group chat and returns memory snapshots the validators accept.
+1. Live model quality: try 10.4-4 (tell the witch the exam is over) and watch whether character-to-character talk happens often enough with `gpt-4o-mini`. If not, try a stronger model. Only `.env` changes.
 2. Bundle an English/Chinese font with a license that allows redistribution. Ryan's package doesn't include one, by design.
 3. **Milestone E:** add the `Windows Desktop` export preset, export from macOS, and run the two acceptance sessions in SPEC §10 on a Windows PC.
 
