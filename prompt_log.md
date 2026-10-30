@@ -117,6 +117,21 @@ Claude asked for the key to be pasted into the file directly, not into the chat.
 - **Final in-game live run:** all checks pass. Exam memory private, blacksmith learned the Dean's List as shared, no markers, both characters spoke. One of three backend group trials showed an unscripted exchange between the two characters.
 - **Totals:** 49 pytest tests. The mock smoke test still passes. README, plus SPEC proposals P10–P11 (appended only).
 
+### 11. 2026-10-30
+
+> please push these changes and start the windows export. ignore the chinese-capable font requirement.
+
+**Outcome:**
+- **Push:** before pushing, Claude fetched and confirmed that GitHub had no new commits, that `server/.env` had never been committed, and that no key-like string appears anywhere in the history. It then pushed 12 commits to `origin/main` (`3a71c8a..ce5d140`).
+- **Windows export:**
+  - Added the `Windows Desktop` preset (`client/export_presets.cfg`). It embeds the game data, includes the `.json` data files the game reads directly, and excludes `tests/`.
+  - Before installing templates, Claude exported only the data package and ran it on macOS. It confirmed all 8 data files are inside and that the full world renders, showing "Backend: offline" with no backend.
+  - Downloaded the official 4.7.2 export templates (1.28 GB), verified their SHA-512, and installed only the Windows x86_64 ones.
+  - Exported `build/windows/Naevia.exe` (110 MB, PE32+ GUI) and `Naevia.console.exe`, and zipped both (38 MB).
+  - A scan found no key-like strings in the exe. `build/` is git-ignored because of GitHub's 100 MB limit.
+- **Not done:** the `.exe` has not been run on Windows; no Windows machine or Wine is available.
+- **Font:** recorded as the owner's decision in the README, plus SPEC proposals P12–P13 (appended byte-for-byte; 0 deletions against Ryan's original).
+
 ## Times the AI did something I didn't want
 
 ### A. Trimmed real dependencies out of the lock file
@@ -198,5 +213,10 @@ Claude's milestone D followed the letter of §4.3: only a nominated character sp
 To append proposals P10–P11, Claude rewrote SPEC.md through Python's text mode, which silently turned two of Ryan's Windows-style (CRLF) line endings into Unix ones. Nothing visible changed, but `git diff` against Ryan's commit showed 2 deleted lines, and the course requires his SPEC unchanged.
 
 **What was done:** Claude caught it with the same diff check used before every SPEC commit. It restored the file from the last commit and appended in binary mode; the diff against `6bb0698` shows 0 deletions again. Lesson: append to files you don't own byte-for-byte.
+
+### M. Small slips during the export
+
+- **A "failed" download that hadn't failed.** The download check reported failure because Claude's command fed it the checksum line for a second archive (the C# templates) that was never downloaded. The archive itself verified `OK`. Claude read the output before retrying, so nothing was downloaded twice.
+- **No console version on the first export.** Claude set the console-wrapper option to `1`, which only applies to debug builds, so the release export had no `Naevia.console.exe`. Claude noticed it missing from the output folder, changed the option to `2`, and exported again.
 
 <!-- Add your own instances below: things you noticed and corrected yourself. -->
