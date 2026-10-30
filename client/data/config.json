@@ -1,0 +1,12 @@
+{
+  "backend_url": "http://127.0.0.1:8000",
+  "characters": ["witch", "blacksmith"],
+  "contacts": {
+    "pigeon_first_delay": 45,
+    "pigeon_interval": 150,
+    "blacksmith_first_delay": 100,
+    "blacksmith_interval": 200,
+    "ignore_timeout": 60
+  },
+  "position_save_debounce": 1.5
+}

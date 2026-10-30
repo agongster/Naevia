@@ -1,0 +1,5 @@
+{
+  "furniture.table": { "name": "Table", "visual": "furniture.table", "icon": "icon.table", "cost": { "item.stone": 3 }, "footprint": [3, 2] },
+  "furniture.chair": { "name": "Chair", "visual": "furniture.chair", "icon": "icon.chair", "cost": { "item.stone": 3 }, "footprint": [1, 2] },
+  "furniture.lamp":  { "name": "Lamp",  "visual": "furniture.lamp",  "icon": "icon.lamp",  "cost": { "item.stone": 3 }, "footprint": [1, 3] }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "blacksmith",
+  "name": "Blacksmith",
+  "personality": "Practical, warm and direct. Likes things that work and people who show up. Says what he thinks, kindly.",
+  "speaking_style": "Plain, friendly sentences. Concrete details over big words. Will mention the work in front of him.",
+  "background": "Runs a small smithy down the road and does repairs for the neighborhood. Knows the player as a friendly neighbor.",
+  "current_situation": "Restoring an old hand-cranked grinding wheel he found at the back of his workshop.",
+  "starting_relationship": "Familiar acquaintance. Friendly, but they share no past adventures."
+}

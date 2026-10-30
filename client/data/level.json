@@ -1,0 +1,34 @@
+{
+  "_comment": "Tile coordinates. Fills apply in order; later fills overwrite. Terrain is cleared wherever a resource is placed. Props use the top-left cell of the image.",
+  "size": [64, 28],
+  "spawn": [28, 17],
+  "fills": [
+    { "layer": "terrain",   "tile": "tile.dirt",             "rect": [0, 19, 64, 9] },
+    { "layer": "terrain",   "tile": "tile.grass",            "rect": [0, 18, 64, 1] },
+    { "layer": "terrain",   "tile": "tile.floor",            "rect": [3, 18, 20, 1] },
+    { "layer": "terrain",   "tile": "tile.grass_edge_right", "rect": [41, 18, 1, 1] },
+    { "layer": "terrain",   "tile": "tile.grass_edge_left",  "rect": [48, 18, 1, 1] },
+    { "layer": "terrain",   "tile": "tile.grass_edge_right", "rect": [51, 18, 1, 1] },
+    { "layer": "terrain",   "tile": "tile.grass_edge_left",  "rect": [57, 18, 1, 1] },
+    { "layer": "walls",     "tile": "tile.wall_wood",        "rect": [3, 11, 20, 7] },
+    { "layer": "walls",     "tile": "tile.roof_edge_left",   "rect": [2, 10, 1, 1] },
+    { "layer": "walls",     "tile": "tile.roof",             "rect": [3, 10, 20, 1] },
+    { "layer": "walls",     "tile": "tile.roof_edge_right",  "rect": [23, 10, 1, 1] },
+    { "layer": "walls",     "tile": "tile.wall_stone",       "rect": [42, 18, 6, 1] },
+    { "layer": "walls",     "tile": "tile.wall_stone",       "rect": [52, 18, 5, 3] },
+    { "layer": "resources", "tile": "tile.stone",            "rect": [44, 15, 2, 1] },
+    { "layer": "resources", "tile": "tile.stone",            "rect": [43, 16, 4, 1] },
+    { "layer": "resources", "tile": "tile.stone",            "rect": [42, 17, 6, 2] },
+    { "layer": "resources", "tile": "tile.stone",            "rect": [52, 18, 5, 3] }
+  ],
+  "props": [
+    { "visual": "prop.window",     "cell": [7, 12] },
+    { "visual": "prop.window",     "cell": [16, 12] },
+    { "visual": "prop.house_trim", "cell": [3, 11],  "repeat_y": 7 },
+    { "visual": "prop.house_trim", "cell": [22, 11], "repeat_y": 4 },
+    { "visual": "prop.door",       "cell": [21, 15], "passable": true }
+  ],
+  "blacksmith_visit_cell": [25, 17],
+  "witch_group_cell": [12, 17],
+  "blacksmith_group_cell": [16, 17]
+}

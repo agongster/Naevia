@@ -1,0 +1,16 @@
+{
+  "tile.dirt":             { "visual": "tile.dirt_fill",        "solid": true },
+  "tile.grass":            { "visual": "tile.grass_top",        "solid": true },
+  "tile.grass_edge_left":  { "visual": "tile.grass_edge_left",  "solid": true },
+  "tile.grass_edge_right": { "visual": "tile.grass_edge_right", "solid": true },
+  "tile.floor":            { "visual": "tile.wood_floor",       "solid": true },
+  "tile.wall_wood":        { "visual": "tile.wall_wood",        "solid": false },
+  "tile.wall_stone":       { "visual": "tile.wall_stone",       "solid": false },
+  "tile.roof":             { "visual": "tile.roof_fill",        "solid": false },
+  "tile.roof_edge_left":   { "visual": "tile.roof_edge_left",   "solid": false },
+  "tile.roof_edge_right":  { "visual": "tile.roof_edge_right",  "solid": false },
+  "tile.stone": {
+    "visual": "tile.stone_fill", "solid": true,
+    "mineable": true, "mine_seconds": 1.0, "drops": "item.stone", "drop_count": 1
+  }
+}
