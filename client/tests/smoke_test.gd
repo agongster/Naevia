@@ -24,12 +24,26 @@ func _ready() -> void:
 	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_ALWAYS_ON_TOP, true)
 	DisplayServer.window_set_mouse_passthrough(PackedVector2Array([Vector2(0, 0), Vector2(1, 0), Vector2(1, 1)]))
 	SaveManager.wipe_slot()
+	# Godot releases held buttons when the window loses focus, so a hold that starts
+	# while macOS is still switching windows gets dropped. Take focus before input.
+	DisplayServer.window_move_to_foreground()
+	await _wait_until(DisplayServer.window_is_focused, 3.0)
+	if not DisplayServer.window_is_focused():
+		print("  warn window not focused; held-input checks may fail")
 	await _run()
 	print("SMOKE %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	get_tree().quit(1 if failures else 0)
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		# macOS hands focus back to the launching app a few seconds in; take it back.
+		print("  info window lost focus at %.1fs; refocusing" % (Time.get_ticks_msec() / 1000.0))
+		DisplayServer.window_move_to_foreground.call_deferred()
+
+
 func _run() -> void:
+	_memory_validation_checks()
 	_load_world()
 	await _frames(20)
 	await _shot("01_start")
@@ -52,7 +66,7 @@ func _run() -> void:
 		if cell == Vector2i(42, 17):
 			_check(world.player.sprite.animation == "mine", "mine animation while holding")
 			await _shot("02_mining_cracks")
-		await _seconds(0.6)
+		await _hold_until(func() -> bool: return world.resources.get_cell_source_id(cell) == -1, 3.0)
 		_mouse_button(MOUSE_BUTTON_LEFT, false)
 		await _frames(2)
 	_check(SaveManager.count("item.stone") == 3, "three stone mined (got %d)" % SaveManager.count("item.stone"))
@@ -121,6 +135,14 @@ func _run() -> void:
 	await _shot("08_witch_reply")
 	var hist := SaveManager.read_history("witch")
 	_check(hist.size() == 2 and hist[1].speaker == "witch", "exchange committed to witch history")
+
+	# Memory: the completed exchange is folded into the witch's own memory file.
+	await _wait_until(func() -> bool: return MemoryStore.get_memory("witch").revision == 1, 5.0)
+	var wm := MemoryStore.get_memory("witch")
+	_check(wm.revision == 1 and wm.last_processed_event_id == hist[1].event_id, "witch memory at revision 1, cursor on last event")
+	_check(FileAccess.file_exists(SaveManager.dir + "characters/witch.memory.json"), "witch memory file written")
+	_check(_memory_text("witch").contains("exams") and wm.experiences[0].learned_from == "player"
+		and wm.experiences[0].share_scope == "private", "witch remembers the exams privately, learned from the player")
 	await _click_button("Close")
 	_check(not world.conversation.is_open(), "conversation closed")
 
@@ -153,12 +175,30 @@ func _run() -> void:
 	await _seconds(0.3)
 	await _shot("10_blacksmith_reply")
 
+	# Isolation: each character's memory holds only what they heard.
+	await _wait_until(func() -> bool: return MemoryStore.get_memory("blacksmith").revision == 1, 5.0)
+	_check(_memory_text("blacksmith").contains("grinding wheel") and not _memory_text("blacksmith").contains("exams"),
+		"blacksmith remembers only his own conversation")
+	_check(not _memory_text("witch").contains("grinding"), "witch memory untouched by the blacksmith chat")
+
+	# Memory failure: chat still works, the old snapshot stays, and the events stay pending.
+	var real_url := ApiClient.base_url
+	ApiClient.base_url = "http://127.0.0.1:1"
+	await _type_and_send("The bellows need patching too.")
+	await _wait_until(func() -> bool: return not world.conversation.is_waiting(), 10.0)
+	await _wait_until(func() -> bool: return MemoryStore.last_error.has("blacksmith"), 5.0)
+	_check(MemoryStore.last_error.has("blacksmith") and MemoryStore.get_memory("blacksmith").revision == 1
+		and MemoryStore.pending_events("blacksmith").size() == 2, "failed memory update keeps old snapshot and pending events")
+	ApiClient.base_url = real_url
+
 	# Persistence: rebuild the world from disk and compare.
 	SaveManager.save_world()
 	var stone := SaveManager.count("item.stone")
 	var pos := world.player.global_position
 	world.free()
 	SaveManager._ready()  # re-read world.json as a fresh launch would
+	MemoryStore._reset()  # drop cached memory; the restart resumes pending work
+	MemoryStore.update_all()
 	_load_world()
 	await _frames(10)
 	_check(SaveManager.count("item.stone") == stone, "stone persisted")
@@ -166,6 +206,56 @@ func _run() -> void:
 	_check(world.resources.get_cell_source_id(Vector2i(42, 17)) == -1, "mined cells persisted")
 	_check(world.player.global_position.distance_to(pos) < 2.0, "player position persisted")
 	await _shot("11_reloaded")
+
+	# Memory across restarts: pending work resumed, and the witch recalls the exams.
+	await _wait_until(func() -> bool: return MemoryStore.get_memory("blacksmith").revision == 2, 5.0)
+	_check(_memory_text("blacksmith").contains("bellows"), "pending blacksmith memory update resumed after restart")
+	_check(MemoryStore.get_memory("witch").revision == 1 and _memory_text("witch").contains("exams"), "witch memory reloaded from disk")
+	world.contacts.summon_pigeon()
+	await _seconds(3.0)
+	await _click_world(world.contacts.pigeon.global_position + Vector2(0, -10))
+	await _wait_until(world.conversation.is_open, 2.0)
+	await _type_and_send("Any advice for studying?")
+	await _wait_until(func() -> bool: return not world.conversation.is_waiting(), 10.0)
+	var last: Dictionary = SaveManager.read_history("witch")[-1]
+	_check(last.speaker == "witch" and last.text.contains("I remember") and last.text.contains("exams"),
+		"witch reply draws on her saved memory")
+	await _seconds(0.3)
+	await _shot("12_witch_remembers")
+	await _click_button("History")
+	await _click_button("Memory")
+	await _shot("13_memory_panel")
+
+
+## Client-side proposal checks (SPEC 5.4), without the backend.
+func _memory_validation_checks() -> void:
+	var job := {"request_id": "m1", "base_revision": 0, "last_event_id": "e2", "allowed": {"e1": true, "e2": true}}
+	var good := MemoryStore.empty_memory("witch")
+	good.revision = 1.0
+	good.last_processed_event_id = "e2"
+	good.facts = [{"id": "f1", "text": "Has exams soon.", "source_event_ids": ["e1"],
+		"learned_from": "player", "share_scope": "private"}]
+	var check := func(m: Dictionary, cid: String) -> String:
+		return MemoryStore._check_proposal("witch", job,
+			{"request_id": "m1", "character_id": cid, "base_revision": 0, "memory": m})
+	_check(check.call(good, "witch") == "", "valid memory proposal accepted")
+	var bad := good.duplicate(true)
+	bad.facts[0].source_event_ids = ["e99"]
+	_check(check.call(bad, "witch") != "", "proposal citing an invented event rejected")
+	bad = good.duplicate(true)
+	bad.revision = 2.0
+	_check(check.call(bad, "witch") != "", "proposal skipping a revision rejected")
+	bad = good.duplicate(true)
+	bad.facts[0].text = "x".repeat(MemoryStore.ENTRY_CAP + 1)
+	_check(check.call(bad, "witch") != "", "oversized memory entry rejected")
+	bad = good.duplicate(true)
+	bad.facts[0].share_scope = "public"
+	_check(check.call(bad, "witch") != "", "invalid share scope rejected")
+	_check(check.call(good, "blacksmith") != "", "proposal for another character rejected")
+
+
+func _memory_text(id: String) -> String:
+	return JSON.stringify(MemoryStore.get_memory(id))
 
 
 # --- Helpers ---
@@ -202,6 +292,17 @@ func _seconds(s: float) -> void:
 func _wait_until(cond: Callable, timeout: float) -> void:
 	var deadline := Time.get_ticks_msec() + int(timeout * 1000.0)
 	while not cond.call() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+
+
+## Keeps the simulated button down until cond holds. Focus changes make Godot
+## release held buttons, so the press is re-sent if that happens, as a real
+## still-held button would be.
+func _hold_until(cond: Callable, timeout: float) -> void:
+	var deadline := Time.get_ticks_msec() + int(timeout * 1000.0)
+	while not cond.call() and Time.get_ticks_msec() < deadline:
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			_mouse_button(MOUSE_BUTTON_LEFT, true)
 		await get_tree().process_frame
 
 
