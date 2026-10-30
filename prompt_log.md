@@ -4,6 +4,7 @@
 
 - Claude Code (VS Code extension), model Claude Opus 5.5 (`claude-opus-5-5`)
 - Python 3.12.9, FastAPI, pytest, on macOS
+- Godot 4.7.2 stable (Compatibility renderer), on an Apple M2 Mac
 
 ## Prompts (verbatim)
 
@@ -36,6 +37,18 @@
 
 **Outcome:** Claude recommended installing Godot on macOS and building and testing there against the mock backend. Godot can export the Windows `.exe` from the Mac, so a Windows machine is needed only for the final acceptance run, for example a campus Windows lab. Claude advised against switching to a web or Python engine, because the spec rules out a web page and the switch would discard Ryan's chosen engine. If Windows access is impossible, the plan is to mark those checks BLOCKED and propose the change in the SPEC proposals section.
 
+### 4. 2026-10-29
+
+> i just installed godot, please start on the game. start by implementing a playable demo with the core mechanics and using the art that he has in the repo.
+
+**Outcome:** Claude built the Godot 4.7.2 client (`client/`) as milestone A from SPEC §8:
+- **Art:** Ryan's 35 PNGs are copied unchanged by `tools/sync_art.py`, which also generates `visuals.json` from his manifest.
+- **Scenes:** `World.tscn` laid out as in SPEC §3.1.
+- **Mechanics:** movement and jumping, hold-to-mine with crack frames and stone chips, bag with buy/place/arrange/store, and pigeon and blacksmith visits with click targets.
+- **Chat:** streamed mock replies in anchored, segmented bubbles styled after Ryan's `ui_direction.png`, a failure bubble with Retry, a History panel, and atomic JSON saves plus JSONL history.
+
+Claude also wrote `tests/smoke_test.gd`, which plays the real scene with simulated input and saves screenshots. It passes 43 checks, and Claude looked at the screenshots to confirm layout and alignment. Memory (C), group chat (D) and the Windows export (E) are not started. The README acceptance report was updated: 0/26 PASS, with mock evidence for 11 checks.
+
 ## Times the AI did something I didn't want
 
 ### A. Trimmed real dependencies out of the lock file
@@ -49,5 +62,21 @@ While writing `server/requirements.lock`, Claude ran `pip freeze` and filtered o
 Commit `69da584` ("validate memory proposals") includes endpoint tests in `test_memory.py`. Those tests import `app.main`, which only arrives two commits later in `e5ccfc2`. If you check out `69da584` alone, the suite fails. I asked for small commits, and the AI split the files by topic without checking that each commit runs on its own.
 
 **What was done:** the history was left as is rather than rewritten, and the problem is documented here. The suite passes from `e5ccfc2` onward. Future commits should run `pytest` before each commit.
+
+### C. Wrote characters that could never be clicked
+
+In `Npc.tscn` and `Pigeon.tscn`, Claude set the click areas to `collision_layer = 0`, meaning to keep them out of the physics simulation. Godot's mouse picking only finds objects on at least one layer, so the pigeon and blacksmith silently ignored every click. Nothing errored; the feature just didn't work. If it had only been tested by reading the code, this would have shipped.
+
+**What was done:** the smoke test failed on "pigeon opens witch conversation". Claude checked a screenshot, saw the pigeon was exactly where the click landed, found the layer setting, and moved the click areas to their own layer 2, which nothing collides with. Lesson: test interactive features by actually clicking them.
+
+### D. Other first-draft bugs the smoke test caught
+
+These are smaller mistakes from the same session. All were caught before committing.
+- **Overrode a built-in method.** A helper was named `_get`, which accidentally overrides Godot's built-in `Object._get` property hook.
+- **Initialization order.** The HUD and contact scheduler used World's node references before World had set them, because in Godot children are ready before their parent.
+- **Oversized error bubble.** The error bubble stayed about 270 px tall because its size was computed before the wrapped text settled.
+- **Test fooled by the real cursor and by throttling.** The first test version read the real mouse cursor and depended on real-time frame rates, so it failed at random when the window was behind VS Code. That was fixed with event-based pointer tracking, mouse passthrough, and `--fixed-fps 60`.
+
+The AI also found that port 8000 was already in use by another program on this Mac (PID 87866). It did **not** kill that process; it ran the test backend on port 8010 and added a `--backend-url` option instead.
 
 <!-- Add your own instances below: things you noticed and corrected yourself. -->
