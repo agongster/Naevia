@@ -74,6 +74,22 @@ Claude also wrote `tests/smoke_test.gd`, which plays the real scene with simulat
 
 README status, code map and acceptance notes were updated (still 0/26 PASS; mock evidence for 14 checks).
 
+### 8. 2026-10-30
+
+> please implement milestone D
+
+**Outcome:** Claude built group conversation (SPEC §4.1, §4.3, §6.3, milestone D):
+- **Invite Both** (Contacts menu) walks the witch and blacksmith in through the door to their spots from `level.json` and opens a group conversation. Timers pause until it closes, and then both leave through the door.
+- **Turn-taking** in `ConversationCoordinator`: a character the player names answers first, otherwise the first responder alternates. A reply's `@to:` hands the turn to the other character, with at most 3 character turns per player message. A message sent while they talk is queued and cancels the remaining turns after the current one. A reply of just "..." counts as declining.
+- **Shared transcript:** `history/group.jsonl`, with History showing "Witch → Blacksmith" for character-to-character lines.
+- **Memory:** `MemoryStore.pending_events()` merges the group transcript with private history, so each guest learns what was said publicly as shared knowledge credited to the speaker. Group requests carry shared memory only, filtered by the client and again by the backend.
+- **Inspection:** `ApiClient.last_chat_requests` keeps the last request per speaker in memory, so tests can inspect the context each character was sent.
+- **Behavior change:** summoning the pigeon or blacksmith now closes any open conversation first. Before, a conversation could stay attached to a visitor who had left.
+- **Backend:** a mock-only `#chain` tag makes characters keep handing off, so the 3-turn cap can be tested. 2 new pytest tests, 36 total.
+- **Smoke test:** 97 checks, passing 4 of 4 runs in a row.
+
+README status, controls, code map and acceptance notes were updated (0/26 PASS; mock evidence for 18 checks).
+
 ## Times the AI did something I didn't want
 
 ### A. Trimmed real dependencies out of the lock file
@@ -121,5 +137,21 @@ In the milestone A demo, the History panel opened partly off-screen in the botto
 Smoke-test runs started failing at random in the mining section. Claude's first guess, that the window wasn't focused when the test started, was wrong: the fix for it changed nothing. Claude then logged focus changes and found that macOS takes focus away from the test window about 3 seconds into **every** run, and Godot releases held mouse buttons when that happens.
 
 **What was done:** the test now takes focus back when it loses it, and it holds the mouse on each stone until the tile breaks, re-pressing if the button was released. It then passed 6 of 6 runs back to back. The game's behavior (letting go of held buttons when you switch apps) was left as is, because that's correct for players.
+
+### H. Wrote test expectations from assumptions instead of the data
+
+Two new group checks failed on the first run although the game was right. Claude had written "the blacksmith's request must not contain 'grinding'" to prove his private chat (about a grinding wheel) was withheld. But the grinding wheel is also in his own profile, which every request rightly includes. It also expected the witch to learn about a "workshop tool", the wording of the spec's starter defaults, when the profile actually says "grinding wheel".
+
+**What was done:** Claude read the actual transcript and memory files before changing anything, confirmed the game behaved correctly, and rewrote the checks to test the right thing: every memory entry in a group request is shared, and his private sentences are absent. Lesson: when a check fails, find out whether the code or the check is wrong before "fixing" either.
+
+### I. Overlapping speech bubbles in group chat
+
+In the first group screenshot, the blacksmith's bubble covered most of the witch's. The bubble code from milestone A only pushed an overlapping bubble upward, and with two characters standing close together under the top bar there was no room. Every check passed, because none of them looked at the layout.
+
+**What was done:** when there's no room above, the bubble now moves sideways away from the other one, and the smoke test checks that the two group bubbles don't overlap.
+
+### G (follow-up). The focus fix was not the whole story
+
+The fix for G held for 6 runs, then mining failed again during this session. Logging showed the failing run lost focus five times, not once, most likely because the computer was in use during the run. Re-taking focus can't win that race. Instead of piling on more workarounds, the test now prints how many times focus was lost whenever it fails, so an interrupted run can be told apart from a real bug.
 
 <!-- Add your own instances below: things you noticed and corrected yourself. -->
