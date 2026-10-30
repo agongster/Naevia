@@ -30,6 +30,12 @@
 
 **Outcome:** Claude compared the repo with Ryan's last commit (`6bb0698`) using git diff and confirmed that 100% of his work is unchanged. All 55 of his files are intact. The art has no changes. SPEC.md has 0 lines removed and only the appended proposals section. All 20 changed files are additions (1,083 lines). Claude agreed that, with no inherited code, the 75% rule means keeping the spec's design and the art package as the foundation, rather than restructuring them.
 
+### 3. 2026-10-29
+
+> Since I am not on Windows, nor do I have Godot, how do you recommend developing this game?
+
+**Outcome:** Claude recommended installing Godot on macOS and building and testing there against the mock backend. Godot can export the Windows `.exe` from the Mac, so a Windows machine is needed only for the final acceptance run, for example a campus Windows lab. Claude advised against switching to a web or Python engine, because the spec rules out a web page and the switch would discard Ryan's chosen engine. If Windows access is impossible, the plan is to mark those checks BLOCKED and propose the change in the SPEC proposals section.
+
 ## Times the AI did something I didn't want
 
 ### A. Trimmed real dependencies out of the lock file
