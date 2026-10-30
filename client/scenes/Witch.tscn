@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Npc.tscn" id="1_npc"]
+
+[node name="Witch" instance=ExtResource("1_npc")]
+character_id = "witch"

@@ -1,0 +1,20 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/pigeon.gd" id="1_pigeon"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_click"]
+size = Vector2(24, 20)
+
+[node name="Pigeon" type="Node2D"]
+script = ExtResource("1_pigeon")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
+centered = false
+
+[node name="ClickArea" type="Area2D" parent="."]
+collision_layer = 2
+collision_mask = 0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ClickArea"]
+position = Vector2(0, -10)
+shape = SubResource("RectangleShape2D_click")
