@@ -11,6 +11,7 @@ var world: World
 var shots := ""
 var failures := 0
 var _mouse := Vector2.ZERO  # simulated pointer, viewport coordinates
+var _focus_losses := 0
 
 
 func _ready() -> void:
@@ -31,6 +32,9 @@ func _ready() -> void:
 	if not DisplayServer.window_is_focused():
 		print("  warn window not focused; held-input checks may fail")
 	await _run()
+	if failures and _focus_losses > 1:
+		print("  note the window lost focus %d times. Godot drops held mouse buttons on focus loss, so mining" % _focus_losses
+			+ " and click failures may come from using the computer during the run. Rerun without touching it.")
 	print("SMOKE %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	get_tree().quit(1 if failures else 0)
 
@@ -38,6 +42,7 @@ func _ready() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		# macOS hands focus back to the launching app a few seconds in; take it back.
+		_focus_losses += 1
 		print("  info window lost focus at %.1fs; refocusing" % (Time.get_ticks_msec() / 1000.0))
 		DisplayServer.window_move_to_foreground.call_deferred()
 
@@ -225,6 +230,121 @@ func _run() -> void:
 	await _click_button("History")
 	await _click_button("Memory")
 	await _shot("13_memory_panel")
+	world.ui._history_panel.visible = false
+	world.ui._show_memory = false
+	await _group_checks()
+
+
+## Milestone D: Invite Both, turn-taking, recipient markers, shared history, and
+## listeners learning from each other without seeing private memory.
+func _group_checks() -> void:
+	var witch := world.contacts.witch
+	var smith := world.contacts.blacksmith
+	await _teleport(Vector2(9 * 16 + 8, 18 * 16))
+	await _click_button("Contacts")
+	await _click_button("Invite Both")
+	await _click_button("Contacts")
+	_check(world.conversation.is_group() and witch.visible and smith.visible, "Invite Both opens a group conversation with both characters")
+	await _wait_until(func() -> bool: return not witch.is_walking() and not smith.is_walking(), 6.0)
+	_check(world.cell_at(witch.position + Vector2(0, -8)) == Vector2i(12, 17)
+		and world.cell_at(smith.position + Vector2(0, -8)) == Vector2i(16, 17), "both walked in to their places in the house")
+	await _shot("14_group_arrived")
+
+	# Announcement: the first responder nominates the other, who answers; then control returns.
+	await _type_and_send("I made the Dean's List!")
+	await _wait_until(func() -> bool: return not world.conversation.is_waiting(), 10.0)
+	var g := SaveManager.read_history("group")
+	_check(g.size() == 3 and g[0].speaker == "player" and g[1].speaker == "witch" and g[1].addressee == "blacksmith"
+		and g[2].speaker == "blacksmith" and g[2].addressee == "player", "witch addressed the blacksmith, he answered, control returned")
+	var bubbles: Dictionary = world.ui.bubbles._bubbles
+	_check(bubbles.has(witch) and bubbles.has(smith) and bubbles[witch].name_label.text == "Witch"
+		and bubbles[smith].name_label.text == "Blacksmith", "each reply is in its speaker's own bubble")
+	await _seconds(0.3)
+	_check(not bubbles[witch].get_rect().intersects(bubbles[smith].get_rect()), "the two bubbles don't overlap")
+	await _shot("15_group_exchange")
+
+	# Privacy: group requests carry shared memory only, never private entries.
+	var wreq: Dictionary = ApiClient.last_chat_requests.witch
+	var breq: Dictionary = ApiClient.last_chat_requests.blacksmith
+	_check(wreq.participants.size() == 3 and _only_shared(wreq.memory) and not JSON.stringify(wreq).contains("exams"),
+		"witch's group request omits her private memory")
+	_check(_only_shared(breq.memory) and not JSON.stringify(breq).contains("bellows")
+		and not JSON.stringify(breq).contains("coming along"), "blacksmith's group request omits his private memory")
+
+	# Naming a character makes them answer first.
+	await _type_and_send("Blacksmith, how is the workshop?")
+	await _wait_until(func() -> bool: return not world.conversation.is_waiting(), 10.0)
+	g = SaveManager.read_history("group")
+	_check(g[3].addressee == "blacksmith" and g[4].speaker == "blacksmith", "the named character answers first")
+
+	# Turn cap: characters that keep nominating each other stop after three turns.
+	await _type_and_send("#chain keep talking")
+	await _wait_until(func() -> bool: return not world.conversation.is_waiting(), 10.0)
+	var turns := _turns_after(SaveManager.read_history("group"), "#chain keep talking")
+	_check(turns == 3, "at most three character turns per message (got %d)" % turns)
+
+	# A message sent mid-turn cancels the queued turns after the current one.
+	await _type_and_send("#chain again")
+	await _wait_until(world.conversation.is_waiting, 2.0)
+	await _type_and_send("Never mind, tea anyone?")
+	_check(world.conversation.queued_message != "" or not world.conversation.is_waiting(), "second message accepted while a character talks")
+	await _wait_until(func() -> bool: return not world.conversation.is_waiting() and world.conversation.queued_message == "", 10.0)
+	var cut := _turns_after(SaveManager.read_history("group"), "#chain again")
+	_check(cut < 3 and _turns_after(SaveManager.read_history("group"), "Never mind, tea anyone?") > 0,
+		"new message cut the chain short (%d turn(s)) and got its own reply" % cut)
+
+	# Closing: guests leave through the door, and each one's memory takes in what they heard.
+	await _click_button("Close")
+	_check(not world.conversation.is_open(), "group conversation closed")
+	await _wait_until(func() -> bool: return not witch.visible and not smith.visible, 6.0)
+	_check(not witch.visible and not smith.visible, "guests left through the door")
+	var settled := func() -> bool:
+		return MemoryStore.pending_events("witch").is_empty() and MemoryStore.pending_events("blacksmith").is_empty()
+	await _wait_until(settled, 10.0)
+	_check(_learned("witch", "blacksmith", "grinding wheel"), "witch learned the blacksmith's news from him (shared)")
+	_check(_learned("blacksmith", "player", "Dean's List"), "blacksmith learned the announcement (shared)")
+	_check(not _memory_text("blacksmith").contains("exams"), "blacksmith still knows nothing of the witch's private exams talk")
+
+	# Restart: what was learned in the group survives.
+	MemoryStore._reset()
+	_check(_learned("witch", "blacksmith", "grinding wheel") and _memory_text("witch").contains("exams"),
+		"after restart the witch keeps both her private and group knowledge")
+	await _click_button("History")
+	await _click_button("Group")
+	await _shot("16_group_history")
+	world.ui._history_panel.visible = false
+
+
+func _only_shared(memory: Dictionary) -> bool:
+	for section in MemoryStore.SECTIONS:
+		for e in memory[section]:
+			if e.share_scope != "shared":
+				return false
+	return true
+
+
+## Character events after the player message with this text, up to the next player message.
+func _turns_after(events: Array, player_text: String) -> int:
+	var n := -1
+	for ev in events:
+		if ev.speaker == "player":
+			if n >= 0:
+				break
+			if ev.text == player_text:
+				n = 0
+		elif n >= 0:
+			n += 1
+	return maxi(n, 0)
+
+
+## True if id's memory has a shared entry learned from `from` containing the text.
+func _learned(id: String, from: String, text: String) -> bool:
+	var m := MemoryStore.get_memory(id)
+	for section in MemoryStore.SECTIONS:
+		for e in m[section]:
+			if e.learned_from == from and e.share_scope == "shared" and String(e.text).contains(text):
+				return true
+	return false
 
 
 ## Client-side proposal checks (SPEC 5.4), without the backend.
